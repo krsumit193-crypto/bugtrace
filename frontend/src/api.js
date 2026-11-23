@@ -18,7 +18,7 @@ async function request(path, options = {}) {
     });
   } catch (error) {
     throw new ApiError(
-      'Could not reach the BugTrace API. Is the Spring Boot backend running on port 8080?',
+      'Could not reach the BugTrace API. Please try again in a moment.',
       0,
     );
   }
