@@ -6,6 +6,10 @@ normalizes volatile values (IDs, timestamps, numbers), groups repeated failures 
 global incidents with a deterministic fingerprint, and exposes all of it through a REST
 API and a React dashboard.
 
+> **Temporary public demo:** https://sitemap-fireplace-utc-occupational.trycloudflare.com
+> (Cloudflare quick tunnel to the dev server — works while the demo machine is online.
+> For a permanent URL, deploy the jar and the `frontend/dist` build to a hosting provider.)
+
 > Every dashboard number comes from the database. There is no mock data and no
 > placeholder screen: an empty database shows zero-valued cards and honest empty states.
 
