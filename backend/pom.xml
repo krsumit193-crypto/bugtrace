@@ -69,4 +69,21 @@
             </plugin>
         </plugins>
     </build>
+
+    <!--
+      Demo profile used by the cloud deployment: adds H2 at runtime so the app
+      can run without a MySQL server. Normal builds keep H2 test-scoped only.
+    -->
+    <profiles>
+        <profile>
+            <id>demo</id>
+            <dependencies>
+                <dependency>
+                    <groupId>com.h2database</groupId>
+                    <artifactId>h2</artifactId>
+                    <scope>runtime</scope>
+                </dependency>
+            </dependencies>
+        </profile>
+    </profiles>
 </project>
