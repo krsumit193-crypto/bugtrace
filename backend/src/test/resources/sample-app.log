@@ -1,0 +1,18 @@
+2026-11-23 10:15:20 INFO [api-gateway] GatewayApplication - Started GatewayApplication in 2.4 seconds
+2026-11-23 10:15:21 INFO [api-gateway] RequestLoggingFilter - Request received from 192.168.1.10
+2026-11-23 10:15:22 WARN [payment-service] PaymentService - Retry attempt 2 for order 5512
+2026-11-23 10:15:23 ERROR [payment-service] PaymentService - Database connection failed for order 5512
+	at com.acme.payment.PaymentRepository.find(PaymentRepository.java:42)
+	at com.acme.payment.PaymentService.charge(PaymentService.java:88)
+	Caused by: java.sql.SQLException: Connection refused
+2026-11-23 10:15:24 ERROR [payment-service] PaymentService - Database connection failed for order 5513
+2026-11-23 10:15:25 INFO [order-service] OrderService - Order 5513 created successfully
+2026-11-23 10:15:26 DEBUG [order-service] OrderService - Debug payload: {"orderId":5513}
+this line is not a log line
+2026-11-23 10:15:27 FATAL [auth-service] AuthService - Out of memory while validating token 0x7ff
+2026-11-23 10:15:28 WARN [auth-service] AuthService - Deprecated token format used
+2026-11-23 10:15:29 ERROR [payment-service] PaymentService - Database connection failed for order 5514
+2026-11-23 10:15:30 INFO [order-service] OrderService - Health check passed
+
+2026-11-23 10:15:31 ERROR [payment-service] PaymentService - Payment failed: requestId=abc-123 timeout after 3000ms
+2026-11-23 10:15:32 ERROR [payment-service] PaymentService - Payment failed: requestId=def-456 timeout after 5000ms

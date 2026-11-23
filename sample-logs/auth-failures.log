@@ -1,0 +1,6 @@
+2026-11-24 08:10:00 INFO [auth-service] AuthApplication - Started AuthApplication
+2026-11-24 08:10:01 WARN [auth-service] LoginService - Multiple failed login attempts for ip 192.168.4.10
+2026-11-24 08:10:02 ERROR [auth-service] LoginService - Invalid credentials for user user-7
+2026-11-24 08:10:03 FATAL [auth-service] KeyStore - Keystore corrupted at 0xCAFE
+2026-11-24 08:10:04 ERROR [api-gateway] RateLimiter - Rate limit exceeded for ip 192.168.4.10
+2026-11-24 08:10:05 ERROR [api-gateway] RateLimiter - Rate limit exceeded for ip 10.0.0.2
