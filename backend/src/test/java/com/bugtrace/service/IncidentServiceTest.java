@@ -112,6 +112,45 @@ class IncidentServiceTest {
                 .hasMessageContaining("from");
     }
 
+    @Test
+    void exportCsvWritesMatchingRows() {
+        when(incidentRepository.findAll(any(org.springframework.data.jpa.domain.Specification.class),
+                any(org.springframework.data.domain.Pageable.class)))
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(java.util.List.of(incident(1L))));
+
+        IncidentExport export = service.exportCsv(null, Severity.ERROR, null, null, null, "latest");
+
+        assertThat(export.rowCount()).isEqualTo(1);
+        assertThat(export.truncated()).isFalse();
+        assertThat(export.filename()).startsWith("bugtrace-incidents-").endsWith(".csv");
+        assertThat(new String(export.content(), java.nio.charset.StandardCharsets.UTF_8))
+                .contains("Database connection failed")
+                .contains("payment-service");
+    }
+
+    @Test
+    void exportCsvCapsRowsAtLimitAndFlagsTruncation() {
+        java.util.List<Incident> rows = java.util.stream.IntStream.rangeClosed(1, 5_001)
+                .mapToObj(index -> incident((long) index))
+                .toList();
+        when(incidentRepository.findAll(any(org.springframework.data.jpa.domain.Specification.class),
+                any(org.springframework.data.domain.Pageable.class)))
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(rows));
+
+        IncidentExport export = service.exportCsv(null, null, null, null, null, "count");
+
+        assertThat(export.rowCount()).isEqualTo(5_000);
+        assertThat(export.truncated()).isTrue();
+    }
+
+    @Test
+    void exportCsvRejectsInvertedDateRange() {
+        assertThatThrownBy(() -> service.exportCsv(
+                null, null, null, LocalDate.of(2026, 11, 24), LocalDate.of(2026, 11, 23), "latest"))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessageContaining("from");
+    }
+
     private Incident incident(Long id) {
         Incident incident = new Incident(
                 "a".repeat(64),

@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api } from '../api';
+import { api, exportIncidents } from '../api';
 import { SeverityBadge, StatusBadge } from '../components/Badges';
 import Pagination from '../components/Pagination';
 import { EmptyState, ErrorState, LoadingState, PageHeader } from '../components/States';
 import useAsync from '../hooks/useAsync';
-import { formatDateTime, formatNumber } from '../utils';
+import { downloadBlob, formatDateTime, formatNumber } from '../utils';
 
 const initialFilters = {
   q: '',
@@ -21,6 +21,7 @@ const initialFilters = {
 export default function IncidentsPage() {
   const [draft, setDraft] = useState(initialFilters);
   const [filters, setFilters] = useState(initialFilters);
+  const [exportState, setExportState] = useState({ busy: false, error: '', message: '' });
 
   const { data, error, loading, reload } = useAsync(
     () => api.listIncidents(filters),
@@ -39,6 +40,30 @@ export default function IncidentsPage() {
   function reset() {
     setDraft(initialFilters);
     setFilters(initialFilters);
+    setExportState({ busy: false, error: '', message: '' });
+  }
+
+  /**
+   * Export uses the *applied* filters, so the file always matches the table
+   * currently on screen (not unsubmitted edits in the form).
+   */
+  async function handleExport() {
+    setExportState({ busy: true, error: '', message: '' });
+    try {
+      // Paging belongs to the table, not the file: export every matching row.
+      const { page, size, ...exportFilters } = filters;
+      const { blob, filename, rowCount, truncated } = await exportIncidents(exportFilters);
+      downloadBlob(blob, filename);
+      setExportState({
+        busy: false,
+        error: '',
+        message: truncated
+          ? `Downloaded the first ${formatNumber(rowCount)} incidents (export limit reached).`
+          : `Downloaded ${formatNumber(rowCount)} incident(s) as CSV.`,
+      });
+    } catch (exportError) {
+      setExportState({ busy: false, error: exportError.message, message: '' });
+    }
   }
 
   return (
@@ -102,16 +127,36 @@ export default function IncidentsPage() {
             <button type="button" className="button button-ghost" onClick={reset}>
               Reset
             </button>
+            <button
+              type="button"
+              className="button"
+              onClick={handleExport}
+              disabled={exportState.busy || loading}
+              title="Download the incidents matching the applied filters"
+            >
+              {exportState.busy ? 'Exporting…' : 'Export CSV'}
+            </button>
           </div>
         </div>
       </form>
+
+      {exportState.error ? (
+        <p className="inline-error" role="alert">
+          Export failed: {exportState.error}
+        </p>
+      ) : null}
+      {exportState.message ? (
+        <p className="muted" role="status">
+          {exportState.message}
+        </p>
+      ) : null}
 
       {loading ? <LoadingState label="Loading incidents…" /> : null}
       {error ? <ErrorState message={error.message} onRetry={reload} /> : null}
 
       {data && !loading ? (
-        <section className="panel table-panel">
-          <h2>
+        <section className="panel table-panel" aria-busy={loading}>
+          <h2 role="status">
             {formatNumber(data.totalElements)} incident(s) found
           </h2>
           {data.content.length === 0 ? (

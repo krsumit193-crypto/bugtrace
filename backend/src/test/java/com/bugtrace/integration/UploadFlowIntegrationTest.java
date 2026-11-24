@@ -20,6 +20,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -136,6 +137,18 @@ class UploadFlowIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements").value(5))
                 .andExpect(jsonPath("$.content[0].occurrenceCount").value(4));
+
+        // CSV export goes through the same filters and serializes the stored rows.
+        MvcResult exportResult = mockMvc.perform(get("/api/incidents/export"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("X-Exported-Rows", "5"))
+                .andExpect(header().string("X-Export-Truncated", "false"))
+                .andReturn();
+
+        String csv = exportResult.getResponse().getContentAsString(StandardCharsets.UTF_8);
+        assertThat(csv).startsWith("\uFEFFid,fingerprint,title");
+        assertThat(csv).contains("Database connection failed");
+        assertThat(csv.lines().count()).isEqualTo(6); // header + 5 incidents
     }
 
     private JsonNode read(MvcResult result) throws Exception {

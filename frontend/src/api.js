@@ -87,6 +87,25 @@ function query(params) {
   return text ? `?${text}` : '';
 }
 
+/**
+ * Extract the download name from a Content-Disposition header.
+ * Prefers the RFC 5987 `filename*` form when the server sends both.
+ *
+ * @param {string|null} value - raw header value
+ * @returns {string|null} decoded filename, or `null` when absent
+ */
+function filenameFromDisposition(value) {
+  if (!value) {
+    return null;
+  }
+  const utf8 = /filename\*=UTF-8''([^;]+)/i.exec(value);
+  if (utf8) {
+    return decodeURIComponent(utf8[1]);
+  }
+  const plain = /filename="?([^";]+)"?/i.exec(value);
+  return plain ? plain[1] : null;
+}
+
 export const api = {
   dashboard: () => request('/api/dashboard/stats'),
 
@@ -113,3 +132,53 @@ export const api = {
     return request('/api/uploads', { method: 'POST', body: form });
   },
 };
+
+/**
+ * Download the incidents matching the current filters as a CSV file.
+ *
+ * Kept outside `request()` because the response body is a binary attachment,
+ * not JSON. Failures are still normalised to `ApiError`.
+ *
+ * @param {Record<string, string|number|undefined|null>} params - same filters as `listIncidents`
+ * @returns {Promise<{blob: Blob, filename: string, rowCount: number, truncated: boolean}>}
+ * @throws {ApiError} when the export fails or the API is unreachable
+ */
+export async function exportIncidents(params = {}) {
+  let response;
+  try {
+    response = await fetch(`${API_BASE}/api/incidents/export${query(params)}`);
+  } catch (error) {
+    throw new ApiError(
+      'Could not reach the BugTrace API. Please try again in a moment.',
+      0,
+    );
+  }
+
+  if (!response.ok) {
+    const text = await response.text();
+    let payload = null;
+    if (text) {
+      try {
+        payload = JSON.parse(text);
+      } catch (error) {
+        payload = null;
+      }
+    }
+    throw new ApiError(
+      payload?.message || `Export failed with status ${response.status}.`,
+      response.status,
+      payload?.fieldErrors ?? {},
+    );
+  }
+
+  const blob = await response.blob();
+  return {
+    blob,
+    filename:
+      filenameFromDisposition(response.headers.get('Content-Disposition')) ??
+      'bugtrace-incidents.csv',
+    rowCount: Number(response.headers.get('X-Exported-Rows') ?? 0),
+    truncated: response.headers.get('X-Export-Truncated') === 'true',
+  };
+}
+

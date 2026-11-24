@@ -27,10 +27,12 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
 import java.time.DateTimeException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.AbstractMap;
 import java.util.Comparator;
 import java.util.List;
@@ -43,6 +45,8 @@ import java.util.Locale;
 public class IncidentService {
 
     private static final int MAX_PAGE_SIZE = 100;
+    /** Keeps a single CSV download small enough to stay responsive. */
+    private static final int MAX_EXPORT_ROWS = 5_000;
     private static final int RELATED_CANDIDATE_LIMIT = 200;
     private static final int RELATED_RESULT_LIMIT = 5;
     private static final double RELATED_MIN_SCORE = 0.45;
@@ -76,19 +80,38 @@ public class IncidentService {
                                                        LocalDate from, LocalDate to,
                                                        String sort, int page, int size) {
         validatePaging(page, size);
-        if (from != null && to != null && from.isAfter(to)) {
-            throw new InvalidRequestException("'from' must be on or before 'to'.");
-        }
 
-        Instant fromInstant = from == null ? null : from.atStartOfDay(zoneId).toInstant();
-        Instant toExclusive = to == null ? null : to.plusDays(1).atStartOfDay(zoneId).toInstant();
-
-        Specification<Incident> specification =
-                IncidentSpecifications.filter(query, severity, status, fromInstant, toExclusive);
+        Specification<Incident> specification = buildSpecification(query, severity, status, from, to);
 
         Pageable pageable = PageRequest.of(page, size, resolveSort(sort));
         Page<Incident> incidents = incidentRepository.findAll(specification, pageable);
         return PageResponse.from(incidents, IncidentSummaryResponse::from);
+    }
+
+    /**
+     * Exports every incident matching the current filters as CSV.
+     *
+     * <p>The result is capped at {@value #MAX_EXPORT_ROWS} rows and reports
+     * truncation, so a broad filter can never stream an unbounded file.</p>
+     */
+    @Transactional(readOnly = true)
+    public IncidentExport exportCsv(String query, Severity severity, IncidentStatus status,
+                                    LocalDate from, LocalDate to, String sort) {
+        Specification<Incident> specification = buildSpecification(query, severity, status, from, to);
+
+        // Fetch one extra row so truncation can be reported without a count query.
+        Pageable pageable = PageRequest.of(0, MAX_EXPORT_ROWS + 1, resolveSort(sort));
+        List<Incident> incidents = incidentRepository.findAll(specification, pageable).getContent();
+
+        boolean truncated = incidents.size() > MAX_EXPORT_ROWS;
+        if (truncated) {
+            incidents = incidents.subList(0, MAX_EXPORT_ROWS);
+        }
+
+        byte[] content = IncidentCsvExporter.toCsv(incidents).getBytes(StandardCharsets.UTF_8);
+        String filename = "bugtrace-incidents-"
+                + LocalDate.now(zoneId).format(DateTimeFormatter.BASIC_ISO_DATE) + ".csv";
+        return new IncidentExport(filename, content, incidents.size(), truncated);
     }
 
     @Transactional(readOnly = true)
@@ -147,6 +170,18 @@ public class IncidentService {
                 .limit(RELATED_RESULT_LIMIT)
                 .map(entry -> RelatedIncidentResponse.from(entry.getKey(), entry.getValue()))
                 .toList();
+    }
+
+    private Specification<Incident> buildSpecification(String query, Severity severity,
+                                                       IncidentStatus status,
+                                                       LocalDate from, LocalDate to) {
+        if (from != null && to != null && from.isAfter(to)) {
+            throw new InvalidRequestException("'from' must be on or before 'to'.");
+        }
+
+        Instant fromInstant = from == null ? null : from.atStartOfDay(zoneId).toInstant();
+        Instant toExclusive = to == null ? null : to.plusDays(1).atStartOfDay(zoneId).toInstant();
+        return IncidentSpecifications.filter(query, severity, status, fromInstant, toExclusive);
     }
 
     private Incident findIncident(Long id) {

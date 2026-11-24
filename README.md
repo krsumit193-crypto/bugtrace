@@ -45,7 +45,7 @@ API and a React dashboard.
 | A | Upload and parse | Validates `.log`/`.txt`, max 10 MB, rejects binary (NUL bytes), streams line by line, keeps raw lines, counts total/parsed/malformed lines. |
 | B | Severity | FATAL, ERROR, WARN, INFO, DEBUG; transparent keyword inference when a level is missing, flagged with `severityInferred`. |
 | C | Grouping | Normalizes messages, builds SHA-256 fingerprints, tracks count, first/last seen, severity and service; Jaccard similarity only suggests related incidents. |
-| D | Incident management | List, search, filter (severity/status/date), sort (latest/count), status changes, investigation notes, underlying entries. |
+| D | Incident management | List, search, filter (severity/status/date), sort (latest/count), status changes, investigation notes, underlying entries, and CSV export of the filtered list. |
 | E | Dashboard | Totals, top repeated errors, errors by service, severity distribution, 14-day error trend and recent incidents — all computed from stored rows. |
 | F | Upload history | Every file with status and counts; open a past upload to see the incidents it produced. |
 
@@ -269,11 +269,29 @@ All list endpoints return the same envelope:
 | GET | `/api/uploads?page=0&size=20` | Upload history | 200 / 400 |
 | GET | `/api/uploads/{id}` | Upload detail + its incidents | 200 / 404 |
 | GET | `/api/incidents?q=&severity=&status=&from=&to=&sort=&page=&size=` | Search and filter | 200 / 400 |
+| GET | `/api/incidents/export?q=&severity=&status=&from=&to=&sort=` | Filtered incidents as a CSV download | 200 / 400 |
 | GET | `/api/incidents/{id}` | Incident detail, notes, related | 200 / 404 |
 | GET | `/api/incidents/{id}/entries?page=0&size=20` | Underlying log entries | 200 / 404 |
 | PATCH | `/api/incidents/{id}/status` | Body `{"status":"INVESTIGATING"}` | 200 / 400, 404 |
 | POST | `/api/incidents/{id}/notes` | Body `{"noteText":"..."}` | 201 / 400, 404 |
 | GET | `/api/dashboard/stats` | All dashboard metrics | 200 |
+
+### CSV export
+
+`GET /api/incidents/export` accepts the same filters as the list endpoint and
+returns a UTF-8 CSV file (with a BOM, so Excel opens it correctly):
+
+```bash
+curl -o incidents.csv "http://localhost:8080/api/incidents/export?severity=ERROR&sort=count"
+```
+
+- `Content-Disposition: attachment; filename="bugtrace-incidents-YYYYMMDD.csv"` is set.
+- `X-Exported-Rows` reports how many rows were written and `X-Export-Truncated: true`
+  means the 5000-row cap was reached.
+- Log text is untrusted, so cells beginning with `=`, `+`, `-` or `@` are prefixed
+  with an apostrophe to block spreadsheet formula injection.
+- In the dashboard, **Export CSV** uses the filters currently applied to the table,
+  not unsaved edits in the form.
 
 Example upload and incident response:
 
@@ -467,8 +485,21 @@ A small frontend quality pass was applied after the first release:
 - Pagination buttons have explicit `aria-label`s and their summaries are
   `aria-live` regions.
 - The incident list keeps its filter draft in sync with the displayed page.
-- The dashboard no longer prints "Most recent incident seen at —" when uploads
+- The dashboard no longer prints "Most recent incident seen at -" when uploads
   exist but none produced incidents.
+
+Follow-up: incident CSV export.
+
+- Backend `GET /api/incidents/export` reuses the exact list filters, caps output at
+  5000 rows and reports truncation via headers.
+- `IncidentCsvExporter` follows RFC 4180 quoting, writes CRLF + BOM and neutralises
+  spreadsheet formula injection in untrusted log text.
+- The incidents page gained an **Export CSV** button with busy/error/success states;
+  failures render in an `role="alert"` region and successful downloads announce the
+  row count.
+- Twelve new tests cover CSV escaping, the export endpoint headers and service-level
+  truncation/validation; the upload integration test now also downloads the CSV.
+  `mvn test` and `npm run build` still pass.
 
 Build still passes with `npm run build` (the documented Recharts chunk warning remains).
 

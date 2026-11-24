@@ -9,12 +9,17 @@ import com.bugtrace.dto.response.LogEntryResponse;
 import com.bugtrace.dto.response.PageResponse;
 import com.bugtrace.enums.IncidentStatus;
 import com.bugtrace.enums.Severity;
+import com.bugtrace.service.IncidentExport;
 import com.bugtrace.service.IncidentService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -55,6 +60,34 @@ public class IncidentController {
     @GetMapping("/{id}")
     public IncidentDetailResponse get(@PathVariable Long id) {
         return incidentService.get(id);
+    }
+
+    /**
+     * Downloads the incidents matching the same filters as {@link #list}.
+     *
+     * <p>Returns {@code text/csv} with an attachment filename plus two small
+     * diagnostics headers: {@code X-Exported-Rows} and
+     * {@code X-Export-Truncated} (true when the 5000 row cap was reached).</p>
+     */
+    @GetMapping(value = "/export", produces = "text/csv")
+    public ResponseEntity<byte[]> export(
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) Severity severity,
+            @RequestParam(required = false) IncidentStatus status,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(defaultValue = "latest") String sort) {
+        IncidentExport export = incidentService.exportCsv(q, severity, status, from, to, sort);
+
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
+                        .filename(export.filename())
+                        .build()
+                        .toString())
+                .header("X-Exported-Rows", Integer.toString(export.rowCount()))
+                .header("X-Export-Truncated", Boolean.toString(export.truncated()))
+                .contentType(new MediaType("text", "csv", java.nio.charset.StandardCharsets.UTF_8))
+                .body(export.content());
     }
 
     @GetMapping("/{id}/entries")

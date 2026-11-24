@@ -56,3 +56,24 @@ export function shortId(value) {
     ? `${value.slice(0, 8)}…`
     : value;
 }
+
+/**
+ * Trigger a browser download for an in-memory blob.
+ *
+ * Creates a temporary object URL, clicks a hidden anchor and revokes the URL
+ * on the next tick so Safari has time to start the download.
+ *
+ * @param {Blob} blob - file contents
+ * @param {string} filename - suggested name shown in the save dialog
+ */
+export function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.rel = 'noopener';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
