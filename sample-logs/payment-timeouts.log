@@ -1,0 +1,11 @@
+2026-11-23 09:00:01 INFO [api-gateway] ApiGateway - Request received from 10.0.0.7
+2026-11-23 09:00:02 WARN [payment-service] PaymentClient - Payment retry 1 for txn 1001
+2026-11-23 09:00:03 ERROR [payment-service] PaymentClient - Gateway timeout for requestId=aa-11 after 2000ms
+2026-11-23 09:00:04 ERROR [payment-service] PaymentClient - Gateway timeout for requestId=bb-22 after 4000ms
+2026-11-23 09:00:05 ERROR [order-service] OrderService - Order creation failed for order 2002
+	at com.acme.order.OrderService.create(OrderService.java:77)
+	Caused by: java.net.SocketTimeoutException: Read timed out
+2026-11-23 09:00:06 ERROR [order-service] OrderService - Order creation failed for order 2003
+2026-11-23 09:00:07 INFO [order-service] OrderService - Health check passed
+not a log line
+2026-11-23 09:00:08 WARN [auth-service] TokenValidator - Token expired for user 42

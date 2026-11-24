@@ -1,0 +1,31 @@
+# Demo-only profile used by the cloud deployment.
+# Uses in-memory H2 in MySQL mode so no external database server is required.
+# Data is lost when the service restarts; this profile is NOT for production.
+spring:
+  datasource:
+    url: jdbc:h2:mem:bugtrace;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: create-drop
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: false
+
+app:
+  log:
+    timezone: UTC
+    incident-severities: WARN,ERROR,FATAL
+  dashboard:
+    trend-days: 14
+
+logging:
+  level:
+    root: WARN
+    com.bugtrace: INFO

@@ -1,0 +1,12 @@
+.git
+**/target
+**/node_modules
+**/dist
+**/*.log
+!sample-logs/*.log
+.env
+.env.*
+*.md
+docs
+frontend/src
+frontend/public
