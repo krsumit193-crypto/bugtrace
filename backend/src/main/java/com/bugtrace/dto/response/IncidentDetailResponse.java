@@ -18,12 +18,17 @@ public record IncidentDetailResponse(
         long occurrenceCount,
         Instant firstSeen,
         Instant lastSeen,
+        Instant resolvedAt,
+        List<String> tags,
         List<IncidentNoteResponse> notes,
+        List<IncidentActivityResponse> activities,
         List<RelatedIncidentResponse> relatedIncidents
 ) {
 
     public static IncidentDetailResponse from(Incident incident,
+                                              List<String> tags,
                                               List<IncidentNoteResponse> notes,
+                                              List<IncidentActivityResponse> activities,
                                               List<RelatedIncidentResponse> relatedIncidents) {
         return new IncidentDetailResponse(
                 incident.getId(),
@@ -36,7 +41,10 @@ public record IncidentDetailResponse(
                 incident.getOccurrenceCount(),
                 incident.getFirstSeen(),
                 incident.getLastSeen(),
+                incident.getResolvedAt(),
+                tags == null ? List.of() : List.copyOf(tags),
                 notes,
+                activities,
                 relatedIncidents
         );
     }

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Bar,
@@ -18,7 +19,9 @@ import { SeverityBadge, StatusBadge } from '../components/Badges';
 import { EmptyState, ErrorState, LoadingState, PageHeader } from '../components/States';
 import StatCard from '../components/StatCard';
 import useAsync from '../hooks/useAsync';
-import { formatDate, formatDateTime, formatNumber } from '../utils';
+import { formatDate, formatDateTime, formatDuration, formatNumber } from '../utils';
+
+const RANGES = [7, 14, 30, 90];
 
 const COLORS = {
   FATAL: '#b42318',
@@ -52,7 +55,11 @@ function MiniIncidentList({ items, emptyMessage }) {
 }
 
 export default function DashboardPage() {
-  const { data, error, loading, reload } = useAsync(api.dashboard, []);
+  const [rangeDays, setRangeDays] = useState(14);
+  const { data, error, loading, reload } = useAsync(
+    () => api.dashboard(rangeDays),
+    [rangeDays],
+  );
 
   if (loading) {
     return <LoadingState label="Loading dashboard metrics…" />;
@@ -77,9 +84,22 @@ export default function DashboardPage() {
         title="Dashboard"
         description="Every number below is computed from the logs you uploaded. Nothing is mocked."
         actions={
-          <Link className="button button-primary" to="/upload">
-            Upload a log file
-          </Link>
+          <>
+            <label className="range-select">
+              Range
+              <select
+                value={rangeDays}
+                onChange={(event) => setRangeDays(Number(event.target.value))}
+              >
+                {RANGES.map((days) => (
+                  <option key={days} value={days}>Last {days} days</option>
+                ))}
+              </select>
+            </label>
+            <Link className="button button-primary" to="/upload">
+              Upload a log file
+            </Link>
+          </>
         }
       />
 
@@ -113,12 +133,22 @@ export default function DashboardPage() {
           value={formatNumber(stats.errorEntries + stats.fatalEntries)}
           hint={`${formatNumber(stats.errorEntries)} error · ${formatNumber(stats.fatalEntries)} fatal`}
         />
+        <StatCard
+          label={`Incidents (${stats.rangeDays}d)`}
+          value={formatNumber(stats.incidentsInRange)}
+          hint={`${formatNumber(stats.resolvedInRange)} resolved in range`}
+        />
+        <StatCard
+          label="Mean time to resolve"
+          value={formatDuration(stats.mttrMinutes)}
+          hint={stats.mttrMinutes === null ? 'No resolutions in range' : 'First seen → resolved'}
+        />
       </section>
 
       <section className="chart-grid">
         <article className="panel chart-panel">
           <h2>Errors over time</h2>
-          <p className="panel-subtitle">Daily ERROR and FATAL entries (last {trend.length} days)</p>
+          <p className="panel-subtitle">Daily ERROR and FATAL entries (last {stats.rangeDays} days)</p>
           <div className="chart-body">
             {stats.errorEntries + stats.fatalEntries === 0 ? (
               <p className="muted">No ERROR or FATAL entries to plot.</p>

@@ -5,15 +5,33 @@ import { SeverityBadge, StatusBadge } from '../components/Badges';
 import Pagination from '../components/Pagination';
 import { EmptyState, ErrorState, LoadingState, PageHeader } from '../components/States';
 import useAsync from '../hooks/useAsync';
-import { formatDateTime, formatNumber } from '../utils';
+import { formatDateTime, formatDuration, formatNumber } from '../utils';
 
 const STATUSES = ['OPEN', 'INVESTIGATING', 'RESOLVED'];
+const MAX_TAGS = 10;
+
+const ACTIVITY_LABELS = {
+  STATUS_CHANGED: 'Status changed',
+  NOTE_ADDED: 'Note added',
+  TAG_ADDED: 'Tag added',
+  TAG_REMOVED: 'Tag removed',
+};
+
+function timeToResolve(incident) {
+  if (!incident.resolvedAt || !incident.firstSeen) {
+    return null;
+  }
+  const minutes =
+    (new Date(incident.resolvedAt).getTime() - new Date(incident.firstSeen).getTime()) / 60000;
+  return Number.isFinite(minutes) && minutes >= 0 ? minutes : null;
+}
 
 export default function IncidentDetailPage() {
   const { id } = useParams();
   const incidentId = Number(id);
   const [entriesPage, setEntriesPage] = useState(0);
   const [noteText, setNoteText] = useState('');
+  const [tagInput, setTagInput] = useState('');
   const [actionError, setActionError] = useState(null);
   const [busy, setBusy] = useState(false);
 
@@ -55,6 +73,46 @@ export default function IncidentDetailPage() {
     }
   }
 
+  async function saveTags(nextTags) {
+    setBusy(true);
+    setActionError(null);
+    try {
+      await api.updateIncidentTags(incidentId, nextTags);
+      incidentState.reload();
+      return true;
+    } catch (cause) {
+      setActionError(cause.message);
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function addTag(event) {
+    event.preventDefault();
+    const tag = tagInput.trim().toLowerCase();
+    if (!tag) {
+      return;
+    }
+    if (incidentState.data.tags.includes(tag)) {
+      setTagInput('');
+      return;
+    }
+    if (incidentState.data.tags.length >= MAX_TAGS) {
+      setActionError(`An incident can have at most ${MAX_TAGS} tags.`);
+      return;
+    }
+    saveTags([...incidentState.data.tags, tag]).then((saved) => {
+      if (saved) {
+        setTagInput('');
+      }
+    });
+  }
+
+  function removeTag(tag) {
+    saveTags(incidentState.data.tags.filter((value) => value !== tag));
+  }
+
   if (incidentState.loading) {
     return <LoadingState label="Loading incident…" />;
   }
@@ -63,6 +121,7 @@ export default function IncidentDetailPage() {
   }
 
   const incident = incidentState.data;
+  const resolutionTime = timeToResolve(incident);
 
   return (
     <div className="page">
@@ -105,6 +164,17 @@ export default function IncidentDetailPage() {
             <span>Last seen</span>
             <strong>{formatDateTime(incident.lastSeen)}</strong>
           </div>
+          {incident.resolvedAt ? (
+            <div className="detail-row">
+              <span>Resolved</span>
+              <strong>
+                {formatDateTime(incident.resolvedAt)}
+                {resolutionTime !== null ? (
+                  <span className="muted"> · {formatDuration(resolutionTime)} to resolve</span>
+                ) : null}
+              </strong>
+            </div>
+          ) : null}
           <div className="detail-row">
             <span>Status</span>
             <div className="inline-control">
@@ -119,6 +189,39 @@ export default function IncidentDetailPage() {
                   <option key={status}>{status}</option>
                 ))}
               </select>
+            </div>
+          </div>
+          <div className="detail-row detail-row-wide">
+            <span>Tags</span>
+            <div className="tag-editor">
+              {incident.tags.map((tag) => (
+                <span key={tag} className="tag-chip">
+                  {tag}
+                  <button
+                    type="button"
+                    className="tag-remove"
+                    aria-label={`Remove tag ${tag}`}
+                    disabled={busy}
+                    onClick={() => removeTag(tag)}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+              <form className="tag-form" onSubmit={addTag}>
+                <input
+                  type="text"
+                  value={tagInput}
+                  maxLength={32}
+                  placeholder="add tag"
+                  aria-label="Add tag"
+                  disabled={busy}
+                  onChange={(event) => setTagInput(event.target.value)}
+                />
+                <button type="submit" className="button button-ghost" disabled={busy || !tagInput.trim()}>
+                  Add
+                </button>
+              </form>
             </div>
           </div>
         </div>
@@ -176,6 +279,32 @@ export default function IncidentDetailPage() {
         </section>
 
         <div className="detail-side">
+          <section className="panel">
+            <h2>Activity</h2>
+            <p className="panel-subtitle">Status changes, notes and tag edits</p>
+            {incident.activities.length === 0 ? (
+              <p className="muted">No activity recorded yet.</p>
+            ) : (
+              <ol className="activity-list">
+                {incident.activities.map((activity) => (
+                  <li key={activity.id}>
+                    <span
+                      className={`activity-dot activity-${activity.type.toLowerCase()}`}
+                      aria-hidden="true"
+                    />
+                    <div>
+                      <div className="activity-head">
+                        <strong>{ACTIVITY_LABELS[activity.type] ?? activity.type}</strong>
+                        <span className="muted">{formatDateTime(activity.createdAt)}</span>
+                      </div>
+                      <p>{activity.detail}</p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </section>
+
           <section className="panel">
             <h2>Investigation notes</h2>
             {incident.notes.length === 0 ? (

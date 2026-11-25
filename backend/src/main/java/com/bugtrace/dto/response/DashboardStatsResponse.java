@@ -5,6 +5,10 @@ import java.util.List;
 /**
  * Everything the overview dashboard needs, in one response. All values come
  * from the database; an empty database produces zeros and empty lists.
+ *
+ * <p>{@code rangeDays} applies to {@code incidentsInRange},
+ * {@code resolvedInRange}, {@code mttrMinutes} and {@code errorsOverTime}.
+ * All-time totals remain independent of the selected range.</p>
  */
 public record DashboardStatsResponse(
         long totalUploads,
@@ -17,6 +21,10 @@ public record DashboardStatsResponse(
         long warnEntries,
         long errorEntries,
         long fatalEntries,
+        int rangeDays,
+        long incidentsInRange,
+        long resolvedInRange,
+        Long mttrMinutes,
         List<IncidentSummaryResponse> topRepeatedErrors,
         List<ServiceErrorCountResponse> errorsByService,
         List<SeverityCountResponse> severityDistribution,

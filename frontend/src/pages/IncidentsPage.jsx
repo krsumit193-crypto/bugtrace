@@ -7,10 +7,13 @@ import { EmptyState, ErrorState, LoadingState, PageHeader } from '../components/
 import useAsync from '../hooks/useAsync';
 import { downloadBlob, formatDateTime, formatNumber } from '../utils';
 
+const STATUSES = ['OPEN', 'INVESTIGATING', 'RESOLVED'];
+
 const initialFilters = {
   q: '',
   severity: '',
   status: '',
+  tag: '',
   from: '',
   to: '',
   sort: 'latest',
@@ -18,15 +21,33 @@ const initialFilters = {
   size: 20,
 };
 
+function TagChips({ tags }) {
+  if (!tags?.length) {
+    return <span className="muted">—</span>;
+  }
+  return (
+    <span className="tag-list">
+      {tags.map((tag) => (
+        <span key={tag} className="tag-chip">{tag}</span>
+      ))}
+    </span>
+  );
+}
+
 export default function IncidentsPage() {
   const [draft, setDraft] = useState(initialFilters);
   const [filters, setFilters] = useState(initialFilters);
+  const [selected, setSelected] = useState([]);
+  const [bulkStatus, setBulkStatus] = useState('INVESTIGATING');
+  const [bulkState, setBulkState] = useState({ busy: false, error: '', message: '' });
   const [exportState, setExportState] = useState({ busy: false, error: '', message: '' });
 
   const { data, error, loading, reload } = useAsync(
     () => api.listIncidents(filters),
     [filters],
   );
+  const tagsState = useAsync(() => api.listIncidentTags(), []);
+  const availableTags = tagsState.data ?? [];
 
   function update(key, value) {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -35,12 +56,53 @@ export default function IncidentsPage() {
   function apply(event) {
     event.preventDefault();
     setFilters({ ...draft, page: 0 });
+    setSelected([]);
+    setBulkState({ busy: false, error: '', message: '' });
   }
 
   function reset() {
     setDraft(initialFilters);
     setFilters(initialFilters);
+    setSelected([]);
+    setBulkState({ busy: false, error: '', message: '' });
     setExportState({ busy: false, error: '', message: '' });
+  }
+
+  function toggleSelected(id) {
+    setSelected((current) =>
+      current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
+  }
+
+  const pageIds = data?.content.map((incident) => incident.id) ?? [];
+  const allOnPageSelected =
+    pageIds.length > 0 && pageIds.every((id) => selected.includes(id));
+
+  function toggleAllOnPage() {
+    setSelected((current) => {
+      if (allOnPageSelected) {
+        return current.filter((id) => !pageIds.includes(id));
+      }
+      return [...new Set([...current, ...pageIds])];
+    });
+  }
+
+  async function applyBulkStatus() {
+    if (selected.length === 0) {
+      return;
+    }
+    setBulkState({ busy: true, error: '', message: '' });
+    try {
+      const result = await api.bulkUpdateIncidentStatus(selected, bulkStatus);
+      setSelected([]);
+      setBulkState({
+        busy: false,
+        error: '',
+        message: `${formatNumber(result.updated)} incident(s) marked ${result.status}.`,
+      });
+      reload();
+    } catch (bulkError) {
+      setBulkState({ busy: false, error: bulkError.message, message: '' });
+    }
   }
 
   /**
@@ -98,9 +160,18 @@ export default function IncidentsPage() {
             Status
             <select value={draft.status} onChange={(event) => update('status', event.target.value)}>
               <option value="">All</option>
-              <option>OPEN</option>
-              <option>INVESTIGATING</option>
-              <option>RESOLVED</option>
+              {STATUSES.map((status) => (
+                <option key={status}>{status}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Tag
+            <select value={draft.tag} onChange={(event) => update('tag', event.target.value)}>
+              <option value="">All</option>
+              {availableTags.map((tag) => (
+                <option key={tag}>{tag}</option>
+              ))}
             </select>
           </label>
           <label>
@@ -159,6 +230,50 @@ export default function IncidentsPage() {
           <h2 role="status">
             {formatNumber(data.totalElements)} incident(s) found
           </h2>
+
+          {selected.length > 0 ? (
+            <div className="bulk-bar" role="region" aria-label="Bulk actions">
+              <span>
+                <strong>{formatNumber(selected.length)}</strong> selected
+              </span>
+              <label>
+                Set status
+                <select
+                  value={bulkStatus}
+                  onChange={(event) => setBulkStatus(event.target.value)}
+                  disabled={bulkState.busy}
+                >
+                  {STATUSES.map((status) => (
+                    <option key={status}>{status}</option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                className="button button-primary"
+                onClick={applyBulkStatus}
+                disabled={bulkState.busy}
+              >
+                {bulkState.busy ? 'Updating…' : 'Apply to selected'}
+              </button>
+              <button
+                type="button"
+                className="button button-ghost"
+                onClick={() => setSelected([])}
+                disabled={bulkState.busy}
+              >
+                Clear selection
+              </button>
+            </div>
+          ) : null}
+
+          {bulkState.error ? (
+            <p className="inline-error" role="alert">{bulkState.error}</p>
+          ) : null}
+          {bulkState.message ? (
+            <p className="muted" role="status">{bulkState.message}</p>
+          ) : null}
+
           {data.content.length === 0 ? (
             <EmptyState
               title="No incidents match these filters"
@@ -170,17 +285,36 @@ export default function IncidentsPage() {
                 <table>
                   <thead>
                     <tr>
+                      <th className="select-cell">
+                        <input
+                          type="checkbox"
+                          className="table-select"
+                          aria-label="Select all incidents on this page"
+                          checked={allOnPageSelected}
+                          onChange={toggleAllOnPage}
+                        />
+                      </th>
                       <th>Incident</th>
                       <th>Service</th>
                       <th>Severity</th>
                       <th>Status</th>
+                      <th>Tags</th>
                       <th className="numeric">Occurrences</th>
                       <th>Last seen</th>
                     </tr>
                   </thead>
                   <tbody>
                     {data.content.map((incident) => (
-                      <tr key={incident.id}>
+                      <tr key={incident.id} className={selected.includes(incident.id) ? 'row-selected' : undefined}>
+                        <td className="select-cell">
+                          <input
+                            type="checkbox"
+                            className="table-select"
+                            aria-label={`Select incident ${incident.id}`}
+                            checked={selected.includes(incident.id)}
+                            onChange={() => toggleSelected(incident.id)}
+                          />
+                        </td>
                         <td>
                           <Link to={`/incidents/${incident.id}`} className="table-link">
                             {incident.title}
@@ -190,6 +324,7 @@ export default function IncidentsPage() {
                         <td>{incident.serviceName ?? 'unknown'}</td>
                         <td><SeverityBadge severity={incident.severity} /></td>
                         <td><StatusBadge status={incident.status} /></td>
+                        <td><TagChips tags={incident.tags} /></td>
                         <td className="numeric">{formatNumber(incident.occurrenceCount)}</td>
                         <td>{formatDateTime(incident.lastSeen)}</td>
                       </tr>
@@ -205,6 +340,7 @@ export default function IncidentsPage() {
                   // Keep the form draft in sync with the applied filters so
                   // the form always reflects the page currently on screen.
                   // (Applying a *new* filter still resets to page 0 by design.)
+                  setSelected([]);
                   setDraft((current) => ({ ...current, page }));
                   setFilters((current) => ({ ...current, page }));
                 }}

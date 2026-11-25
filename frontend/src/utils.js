@@ -40,6 +40,29 @@ export function formatNumber(value) {
   return numberFormatter.format(value ?? 0);
 }
 
+/**
+ * Render a duration in minutes as a compact human value.
+ * @param {number|null|undefined} minutes - duration in minutes
+ * @returns {string} e.g. `42 min`, `3h 15m`, `2d 4h`, or `—` when unknown
+ */
+export function formatDuration(minutes) {
+  if (minutes === null || minutes === undefined || Number.isNaN(Number(minutes))) {
+    return '—';
+  }
+  const total = Math.max(0, Math.round(Number(minutes)));
+  if (total < 60) {
+    return `${total} min`;
+  }
+  const hours = Math.floor(total / 60);
+  if (hours < 24) {
+    const rest = total % 60;
+    return rest ? `${hours}h ${rest}m` : `${hours}h`;
+  }
+  const days = Math.floor(hours / 24);
+  const restHours = hours % 24;
+  return restHours ? `${days}d ${restHours}h` : `${days}d`;
+}
+
 /** @param {number|null|undefined} bytes - file size; rendered in the largest fitting unit */
 export function formatBytes(bytes) {
   if (!bytes) {

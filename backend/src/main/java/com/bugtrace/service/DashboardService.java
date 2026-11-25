@@ -6,6 +6,7 @@ import com.bugtrace.dto.response.IncidentSummaryResponse;
 import com.bugtrace.dto.response.ServiceErrorCountResponse;
 import com.bugtrace.dto.response.SeverityCountResponse;
 import com.bugtrace.dto.response.TrendPointResponse;
+import com.bugtrace.entity.Incident;
 import com.bugtrace.enums.IncidentStatus;
 import com.bugtrace.enums.Severity;
 import com.bugtrace.repository.IncidentRepository;
@@ -15,6 +16,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -53,6 +55,16 @@ public class DashboardService {
 
     @Transactional(readOnly = true)
     public DashboardStatsResponse getStats() {
+        return getStats(appProperties.getDashboard().getTrendDays());
+    }
+
+    /**
+     * @param requestedDays trend/range window, clamped to 1..90 days
+     */
+    @Transactional(readOnly = true)
+    public DashboardStatsResponse getStats(int requestedDays) {
+        int days = Math.max(1, Math.min(requestedDays, MAX_TREND_DAYS));
+
         LogUploadRepository.UploadTotals totals = uploadRepository.summaryTotals();
 
         long totalUploads = valueOrZero(totals.getUploadCount());
@@ -67,6 +79,13 @@ public class DashboardService {
         long errorEntries = logEntryRepository.countBySeverity(Severity.ERROR);
         long fatalEntries = logEntryRepository.countBySeverity(Severity.FATAL);
 
+        LocalDate today = LocalDate.now(ZoneOffset.UTC);
+        Instant rangeStart = today.minusDays(days - 1L).atStartOfDay(ZoneOffset.UTC).toInstant();
+        long incidentsInRange = incidentRepository.countByLastSeenGreaterThanEqual(rangeStart);
+        List<Incident> resolvedInRange = incidentRepository
+                .findByStatusAndResolvedAtGreaterThanEqual(IncidentStatus.RESOLVED, rangeStart);
+        Long mttrMinutes = averageResolutionMinutes(resolvedInRange);
+
         return new DashboardStatsResponse(
                 totalUploads,
                 totalLines,
@@ -78,10 +97,14 @@ public class DashboardService {
                 warnEntries,
                 errorEntries,
                 fatalEntries,
+                days,
+                incidentsInRange,
+                resolvedInRange.size(),
+                mttrMinutes,
                 topRepeatedErrors(),
                 errorsByService(),
                 severityDistribution(),
-                errorsOverTime(),
+                errorsOverTime(days),
                 recentIncidents()
         );
     }
@@ -136,10 +159,7 @@ public class DashboardService {
         return distribution;
     }
 
-    private List<TrendPointResponse> errorsOverTime() {
-        int configuredDays = appProperties.getDashboard().getTrendDays();
-        int days = Math.max(1, Math.min(configuredDays, MAX_TREND_DAYS));
-
+    private List<TrendPointResponse> errorsOverTime(int days) {
         LocalDate today = LocalDate.now(ZoneOffset.UTC);
         LocalDate start = today.minusDays(days - 1L);
         Instant from = start.atStartOfDay(ZoneOffset.UTC).toInstant();
@@ -160,6 +180,31 @@ public class DashboardService {
             points.add(new TrendPointResponse(date, byDay.getOrDefault(date, 0L)));
         }
         return points;
+    }
+
+    /**
+     * Mean time from first observation to resolution, in minutes, for the
+     * incidents resolved inside the selected range. Returns {@code null} when
+     * nothing was resolved in that window (the UI shows "—").
+     */
+    private Long averageResolutionMinutes(List<Incident> resolved) {
+        if (resolved.isEmpty()) {
+            return null;
+        }
+
+        long totalMinutes = 0;
+        int counted = 0;
+        for (Incident incident : resolved) {
+            if (incident.getFirstSeen() == null || incident.getResolvedAt() == null) {
+                continue;
+            }
+            long minutes = Duration.between(incident.getFirstSeen(), incident.getResolvedAt()).toMinutes();
+            if (minutes >= 0) {
+                totalMinutes += minutes;
+                counted++;
+            }
+        }
+        return counted == 0 ? null : Math.round((double) totalMinutes / counted);
     }
 
     private LocalDate toLocalDate(Object value) {

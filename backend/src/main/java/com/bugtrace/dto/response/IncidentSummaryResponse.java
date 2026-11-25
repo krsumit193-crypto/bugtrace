@@ -5,6 +5,7 @@ import com.bugtrace.enums.IncidentStatus;
 import com.bugtrace.enums.Severity;
 
 import java.time.Instant;
+import java.util.List;
 
 public record IncidentSummaryResponse(
         Long id,
@@ -14,10 +15,16 @@ public record IncidentSummaryResponse(
         IncidentStatus status,
         long occurrenceCount,
         Instant firstSeen,
-        Instant lastSeen
+        Instant lastSeen,
+        Instant resolvedAt,
+        List<String> tags
 ) {
 
     public static IncidentSummaryResponse from(Incident incident) {
+        return from(incident, List.of());
+    }
+
+    public static IncidentSummaryResponse from(Incident incident, List<String> tags) {
         return new IncidentSummaryResponse(
                 incident.getId(),
                 incident.getTitle(),
@@ -26,7 +33,9 @@ public record IncidentSummaryResponse(
                 incident.getStatus(),
                 incident.getOccurrenceCount(),
                 incident.getFirstSeen(),
-                incident.getLastSeen()
+                incident.getLastSeen(),
+                incident.getResolvedAt(),
+                tags == null ? List.of() : List.copyOf(tags)
         );
     }
 }

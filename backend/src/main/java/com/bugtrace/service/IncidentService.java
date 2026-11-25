@@ -1,6 +1,8 @@
 package com.bugtrace.service;
 
 import com.bugtrace.config.AppProperties;
+import com.bugtrace.dto.response.BulkStatusResponse;
+import com.bugtrace.dto.response.IncidentActivityResponse;
 import com.bugtrace.dto.response.IncidentDetailResponse;
 import com.bugtrace.dto.response.IncidentNoteResponse;
 import com.bugtrace.dto.response.IncidentSummaryResponse;
@@ -8,16 +10,21 @@ import com.bugtrace.dto.response.LogEntryResponse;
 import com.bugtrace.dto.response.PageResponse;
 import com.bugtrace.dto.response.RelatedIncidentResponse;
 import com.bugtrace.entity.Incident;
+import com.bugtrace.entity.IncidentActivity;
 import com.bugtrace.entity.IncidentNote;
+import com.bugtrace.entity.IncidentTag;
 import com.bugtrace.entity.LogEntry;
+import com.bugtrace.enums.IncidentActivityType;
 import com.bugtrace.enums.IncidentStatus;
 import com.bugtrace.enums.Severity;
 import com.bugtrace.exception.InvalidRequestException;
 import com.bugtrace.exception.ResourceNotFoundException;
 import com.bugtrace.parser.SimilarityScorer;
+import com.bugtrace.repository.IncidentActivityRepository;
 import com.bugtrace.repository.IncidentNoteRepository;
 import com.bugtrace.repository.IncidentRepository;
 import com.bugtrace.repository.IncidentSpecifications;
+import com.bugtrace.repository.IncidentTagRepository;
 import com.bugtrace.repository.LogEntryRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -34,12 +41,21 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.AbstractMap;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
- * Incident search, detail, status changes and investigation notes.
+ * Incident search, detail, status changes, tags and investigation notes.
  */
 @Service
 public class IncidentService {
@@ -50,21 +66,32 @@ public class IncidentService {
     private static final int RELATED_CANDIDATE_LIMIT = 200;
     private static final int RELATED_RESULT_LIMIT = 5;
     private static final double RELATED_MIN_SCORE = 0.45;
+    private static final int MAX_TAGS = 10;
+    private static final int MAX_TAG_LENGTH = 32;
+    private static final int MAX_ACTIVITY_DETAIL = 500;
+    private static final Pattern TAG_PATTERN =
+            Pattern.compile("[a-z0-9][a-z0-9_-]{0," + (MAX_TAG_LENGTH - 1) + "}");
 
     private final IncidentRepository incidentRepository;
     private final IncidentNoteRepository noteRepository;
     private final LogEntryRepository logEntryRepository;
+    private final IncidentTagRepository tagRepository;
+    private final IncidentActivityRepository activityRepository;
     private final SimilarityScorer similarityScorer;
     private final ZoneId zoneId;
 
     public IncidentService(IncidentRepository incidentRepository,
                            IncidentNoteRepository noteRepository,
                            LogEntryRepository logEntryRepository,
+                           IncidentTagRepository tagRepository,
+                           IncidentActivityRepository activityRepository,
                            SimilarityScorer similarityScorer,
                            AppProperties appProperties) {
         this.incidentRepository = incidentRepository;
         this.noteRepository = noteRepository;
         this.logEntryRepository = logEntryRepository;
+        this.tagRepository = tagRepository;
+        this.activityRepository = activityRepository;
         this.similarityScorer = similarityScorer;
         try {
             this.zoneId = ZoneId.of(appProperties.getLog().getTimezone());
@@ -79,13 +106,23 @@ public class IncidentService {
                                                        IncidentStatus status,
                                                        LocalDate from, LocalDate to,
                                                        String sort, int page, int size) {
+        return list(query, severity, status, null, from, to, sort, page, size);
+    }
+
+    @Transactional(readOnly = true)
+    public PageResponse<IncidentSummaryResponse> list(String query, Severity severity,
+                                                       IncidentStatus status, String tag,
+                                                       LocalDate from, LocalDate to,
+                                                       String sort, int page, int size) {
         validatePaging(page, size);
 
-        Specification<Incident> specification = buildSpecification(query, severity, status, from, to);
-
+        Specification<Incident> specification = buildSpecification(query, severity, status, tag, from, to);
         Pageable pageable = PageRequest.of(page, size, resolveSort(sort));
         Page<Incident> incidents = incidentRepository.findAll(specification, pageable);
-        return PageResponse.from(incidents, IncidentSummaryResponse::from);
+
+        Map<Long, List<String>> tags = tagsFor(incidents.getContent());
+        return PageResponse.from(incidents, incident -> IncidentSummaryResponse.from(
+                incident, tags.getOrDefault(incident.getId(), List.of())));
     }
 
     /**
@@ -97,7 +134,13 @@ public class IncidentService {
     @Transactional(readOnly = true)
     public IncidentExport exportCsv(String query, Severity severity, IncidentStatus status,
                                     LocalDate from, LocalDate to, String sort) {
-        Specification<Incident> specification = buildSpecification(query, severity, status, from, to);
+        return exportCsv(query, severity, status, null, from, to, sort);
+    }
+
+    @Transactional(readOnly = true)
+    public IncidentExport exportCsv(String query, Severity severity, IncidentStatus status, String tag,
+                                    LocalDate from, LocalDate to, String sort) {
+        Specification<Incident> specification = buildSpecification(query, severity, status, tag, from, to);
 
         // Fetch one extra row so truncation can be reported without a count query.
         Pageable pageable = PageRequest.of(0, MAX_EXPORT_ROWS + 1, resolveSort(sort));
@@ -117,11 +160,17 @@ public class IncidentService {
     @Transactional(readOnly = true)
     public IncidentDetailResponse get(Long id) {
         Incident incident = findIncident(id);
+        List<String> tags = tagsFor(incident);
         List<IncidentNoteResponse> notes = noteRepository.findByIncidentIdOrderByCreatedAtAsc(id)
                 .stream()
                 .map(IncidentNoteResponse::from)
                 .toList();
-        return IncidentDetailResponse.from(incident, notes, findRelated(incident));
+        List<IncidentActivityResponse> activities = activityRepository
+                .findByIncidentIdOrderByCreatedAtDescIdDesc(id)
+                .stream()
+                .map(IncidentActivityResponse::from)
+                .toList();
+        return IncidentDetailResponse.from(incident, tags, notes, activities, findRelated(incident));
     }
 
     @Transactional(readOnly = true)
@@ -139,8 +188,42 @@ public class IncidentService {
     @Transactional
     public IncidentSummaryResponse updateStatus(Long id, IncidentStatus status) {
         Incident incident = findIncident(id);
-        incident.setStatus(status);
-        return IncidentSummaryResponse.from(incident);
+        applyStatus(incident, status);
+        return IncidentSummaryResponse.from(incident, tagsFor(incident));
+    }
+
+    /**
+     * Update several incidents at once. Missing ids fail the whole request so
+     * the caller never sees a silently partial result.
+     */
+    @Transactional
+    public BulkStatusResponse bulkUpdateStatus(List<Long> ids, IncidentStatus status) {
+        if (ids == null || ids.isEmpty()) {
+            throw new InvalidRequestException("'ids' must contain at least one incident id.");
+        }
+        if (ids.size() > 100) {
+            throw new InvalidRequestException("At most 100 incidents can be updated at once.");
+        }
+        if (ids.stream().anyMatch(Objects::isNull)) {
+            throw new InvalidRequestException("Incident ids must not be null.");
+        }
+        if (status == null) {
+            throw new InvalidRequestException("'status' is required.");
+        }
+
+        List<Long> uniqueIds = ids.stream().distinct().toList();
+        List<Incident> incidents = incidentRepository.findAllById(uniqueIds);
+        if (incidents.size() != uniqueIds.size()) {
+            throw new ResourceNotFoundException("One or more incidents were not found.");
+        }
+
+        int updated = 0;
+        for (Incident incident : incidents) {
+            if (applyStatus(incident, status)) {
+                updated++;
+            }
+        }
+        return new BulkStatusResponse(updated, status);
     }
 
     @Transactional
@@ -149,8 +232,92 @@ public class IncidentService {
             throw new InvalidRequestException("noteText must not be blank.");
         }
         Incident incident = findIncident(id);
-        IncidentNote note = noteRepository.save(new IncidentNote(incident, noteText.strip(), Instant.now()));
+        String text = noteText.strip();
+        IncidentNote note = noteRepository.save(new IncidentNote(incident, text, Instant.now()));
+        recordActivity(incident.getId(), IncidentActivityType.NOTE_ADDED,
+                "Note added: " + truncate(text, 120));
         return IncidentNoteResponse.from(note);
+    }
+
+    /**
+     * Replace the complete tag set. Only the difference is written, and every
+     * addition/removal is recorded in the activity trail.
+     */
+    @Transactional
+    public List<String> replaceTags(Long id, List<String> rawTags) {
+        Incident incident = findIncident(id);
+        LinkedHashSet<String> desired = new LinkedHashSet<>();
+        if (rawTags != null) {
+            for (String rawTag : rawTags) {
+                if (rawTag == null || rawTag.isBlank()) {
+                    continue;
+                }
+                desired.add(normalizeTag(rawTag));
+            }
+        }
+        if (desired.size() > MAX_TAGS) {
+            throw new InvalidRequestException("An incident can have at most " + MAX_TAGS + " tags.");
+        }
+
+        List<IncidentTag> existing = tagRepository.findByIncidentIdOrderByTagAsc(id);
+        Set<String> existingTags = existing.stream()
+                .map(IncidentTag::getTag)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+
+        List<IncidentTag> removed = existing.stream()
+                .filter(tag -> !desired.contains(tag.getTag()))
+                .toList();
+        if (!removed.isEmpty()) {
+            tagRepository.deleteAll(removed);
+            for (IncidentTag tag : removed) {
+                recordActivity(incident.getId(), IncidentActivityType.TAG_REMOVED,
+                        "Removed tag '" + tag.getTag() + "'");
+            }
+        }
+
+        List<IncidentTag> added = desired.stream()
+                .filter(tag -> !existingTags.contains(tag))
+                .map(tag -> new IncidentTag(incident.getId(), tag, Instant.now()))
+                .toList();
+        if (!added.isEmpty()) {
+            tagRepository.saveAll(added);
+            for (IncidentTag tag : added) {
+                recordActivity(incident.getId(), IncidentActivityType.TAG_ADDED,
+                        "Added tag '" + tag.getTag() + "'");
+            }
+        }
+
+        return desired.stream().sorted().toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<String> listTags() {
+        return tagRepository.findDistinctTags();
+    }
+
+    private boolean applyStatus(Incident incident, IncidentStatus status) {
+        if (status == null) {
+            throw new InvalidRequestException("'status' is required.");
+        }
+        IncidentStatus previous = incident.getStatus();
+        if (previous == status) {
+            return false;
+        }
+
+        incident.setStatus(status);
+        if (status == IncidentStatus.RESOLVED) {
+            incident.setResolvedAt(Instant.now());
+        } else {
+            incident.setResolvedAt(null);
+        }
+        recordActivity(incident.getId(), IncidentActivityType.STATUS_CHANGED,
+                previous + " -> " + status);
+        return true;
+    }
+
+    private void recordActivity(Long incidentId, IncidentActivityType type, String detail) {
+        activityRepository.save(new IncidentActivity(
+                incidentId, type, truncate(detail, MAX_ACTIVITY_DETAIL), Instant.now()));
     }
 
     private List<RelatedIncidentResponse> findRelated(Incident incident) {
@@ -172,8 +339,26 @@ public class IncidentService {
                 .toList();
     }
 
+    private Map<Long, List<String>> tagsFor(List<Incident> incidents) {
+        if (incidents.isEmpty()) {
+            return Map.of();
+        }
+        List<Long> ids = incidents.stream().map(Incident::getId).toList();
+        return tagRepository.findByIncidentIdInOrderByTagAsc(ids).stream()
+                .collect(Collectors.groupingBy(
+                        IncidentTag::getIncidentId,
+                        LinkedHashMap::new,
+                        Collectors.mapping(IncidentTag::getTag, Collectors.toList())));
+    }
+
+    private List<String> tagsFor(Incident incident) {
+        return tagRepository.findByIncidentIdOrderByTagAsc(incident.getId()).stream()
+                .map(IncidentTag::getTag)
+                .toList();
+    }
+
     private Specification<Incident> buildSpecification(String query, Severity severity,
-                                                       IncidentStatus status,
+                                                       IncidentStatus status, String tag,
                                                        LocalDate from, LocalDate to) {
         if (from != null && to != null && from.isAfter(to)) {
             throw new InvalidRequestException("'from' must be on or before 'to'.");
@@ -181,7 +366,19 @@ public class IncidentService {
 
         Instant fromInstant = from == null ? null : from.atStartOfDay(zoneId).toInstant();
         Instant toExclusive = to == null ? null : to.plusDays(1).atStartOfDay(zoneId).toInstant();
-        return IncidentSpecifications.filter(query, severity, status, fromInstant, toExclusive);
+        String normalizedTag = tag == null || tag.isBlank() ? null : normalizeTag(tag);
+        return IncidentSpecifications.filter(
+                query, severity, status, normalizedTag, fromInstant, toExclusive);
+    }
+
+    private String normalizeTag(String rawTag) {
+        String tag = rawTag.strip().toLowerCase(Locale.ROOT);
+        if (!TAG_PATTERN.matcher(tag).matches()) {
+            throw new InvalidRequestException(
+                    "Invalid tag '" + rawTag + "'. Use 1-" + MAX_TAG_LENGTH
+                            + " lowercase letters, digits, '-' or '_'.");
+        }
+        return tag;
     }
 
     private Incident findIncident(Long id) {
@@ -208,5 +405,12 @@ public class IncidentService {
         if (size < 1 || size > MAX_PAGE_SIZE) {
             throw new InvalidRequestException("'size' must be between 1 and " + MAX_PAGE_SIZE + ".");
         }
+    }
+
+    private static String truncate(String value, int maxLength) {
+        if (value == null || value.length() <= maxLength) {
+            return value;
+        }
+        return value.substring(0, maxLength);
     }
 }

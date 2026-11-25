@@ -1,11 +1,14 @@
 package com.bugtrace.repository;
 
 import com.bugtrace.entity.Incident;
+import com.bugtrace.entity.IncidentTag;
 import com.bugtrace.enums.IncidentStatus;
 import com.bugtrace.enums.Severity;
 import org.springframework.data.jpa.domain.Specification;
 
 import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Root;
+import jakarta.persistence.criteria.Subquery;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -23,6 +26,12 @@ public final class IncidentSpecifications {
     public static Specification<Incident> filter(String query, Severity severity,
                                                  IncidentStatus status,
                                                  Instant from, Instant toExclusive) {
+        return filter(query, severity, status, null, from, toExclusive);
+    }
+
+    public static Specification<Incident> filter(String query, Severity severity,
+                                                 IncidentStatus status, String tag,
+                                                 Instant from, Instant toExclusive) {
         return (root, criteriaQuery, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
 
@@ -39,6 +48,15 @@ public final class IncidentSpecifications {
             }
             if (status != null) {
                 predicates.add(cb.equal(root.get("status"), status));
+            }
+            if (tag != null && !tag.isBlank()) {
+                // Correlated subquery keeps the page query free of duplicate rows
+                // (a join on incident_tag could return one incident several times).
+                Subquery<Long> tagged = criteriaQuery.subquery(Long.class);
+                Root<IncidentTag> tagRoot = tagged.from(IncidentTag.class);
+                tagged.select(tagRoot.get("incidentId"))
+                        .where(cb.equal(tagRoot.get("tag"), tag.strip().toLowerCase(Locale.ROOT)));
+                predicates.add(root.get("id").in(tagged));
             }
             if (from != null) {
                 predicates.add(cb.greaterThanOrEqualTo(root.get("lastSeen"), from));

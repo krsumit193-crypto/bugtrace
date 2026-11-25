@@ -107,16 +107,27 @@ function filenameFromDisposition(value) {
 }
 
 export const api = {
-  dashboard: () => request('/api/dashboard/stats'),
+  dashboard: (days = 14) => request(`/api/dashboard/stats${query({ days })}`),
 
   listIncidents: (params) => request(`/api/incidents${query(params)}`),
   getIncident: (id) => request(`/api/incidents/${id}`),
   getIncidentEntries: (id, params) =>
     request(`/api/incidents/${id}/entries${query(params)}`),
+  listIncidentTags: () => request('/api/incidents/tags'),
   updateIncidentStatus: (id, status) =>
     request(`/api/incidents/${id}/status`, {
       method: 'PATCH',
       body: JSON.stringify({ status }),
+    }),
+  bulkUpdateIncidentStatus: (ids, status) =>
+    request('/api/incidents/bulk-status', {
+      method: 'PATCH',
+      body: JSON.stringify({ ids, status }),
+    }),
+  updateIncidentTags: (id, tags) =>
+    request(`/api/incidents/${id}/tags`, {
+      method: 'PUT',
+      body: JSON.stringify({ tags }),
     }),
   addIncidentNote: (id, noteText) =>
     request(`/api/incidents/${id}/notes`, {

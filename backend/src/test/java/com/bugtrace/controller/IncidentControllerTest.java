@@ -1,5 +1,7 @@
 package com.bugtrace.controller;
 
+import com.bugtrace.dto.response.BulkStatusResponse;
+import com.bugtrace.enums.IncidentStatus;
 import com.bugtrace.exception.ResourceNotFoundException;
 import com.bugtrace.service.IncidentExport;
 import com.bugtrace.service.IncidentService;
@@ -14,7 +16,9 @@ import org.springframework.test.web.servlet.MockMvc;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -73,7 +77,7 @@ class IncidentControllerTest {
                         .getBytes(java.nio.charset.StandardCharsets.UTF_8),
                 1,
                 false);
-        when(incidentService.exportCsv(any(), any(), any(), any(), any(), any()))
+        when(incidentService.exportCsv(any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(export);
 
         mockMvc.perform(get("/api/incidents/export").param("severity", "ERROR"))
@@ -88,7 +92,7 @@ class IncidentControllerTest {
 
     @Test
     void exportRejectsInvertedDateRange() throws Exception {
-        when(incidentService.exportCsv(any(), any(), any(), any(), any(), any()))
+        when(incidentService.exportCsv(any(), any(), any(), any(), any(), any(), any()))
                 .thenThrow(new com.bugtrace.exception.InvalidRequestException(
                         "'from' must be on or before 'to'."));
 
@@ -98,5 +102,50 @@ class IncidentControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.status").value(400))
                 .andExpect(jsonPath("$.message").value("'from' must be on or before 'to'."));
+    }
+
+    @Test
+    void bulkStatusRejectsAnEmptyIdList() throws Exception {
+        mockMvc.perform(patch("/api/incidents/bulk-status")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"ids\":[],\"status\":\"RESOLVED\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.fieldErrors.ids").exists());
+    }
+
+    @Test
+    void bulkStatusReturnsTheUpdatedCount() throws Exception {
+        when(incidentService.bulkUpdateStatus(any(), any()))
+                .thenReturn(new BulkStatusResponse(2, IncidentStatus.RESOLVED));
+
+        mockMvc.perform(patch("/api/incidents/bulk-status")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"ids\":[1,2],\"status\":\"RESOLVED\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.updated").value(2))
+                .andExpect(jsonPath("$.status").value("RESOLVED"));
+    }
+
+    @Test
+    void tagsEndpointReturnsSuggestions() throws Exception {
+        when(incidentService.listTags()).thenReturn(java.util.List.of("database", "payment"));
+
+        mockMvc.perform(get("/api/incidents/tags"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0]").value("database"))
+                .andExpect(jsonPath("$[1]").value("payment"));
+    }
+
+    @Test
+    void replacingTagsReturnsTheNormalisedSet() throws Exception {
+        when(incidentService.replaceTags(any(), any()))
+                .thenReturn(java.util.List.of("database"));
+
+        mockMvc.perform(put("/api/incidents/7/tags")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tags\":[\"Database\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0]").value("database"));
     }
 }

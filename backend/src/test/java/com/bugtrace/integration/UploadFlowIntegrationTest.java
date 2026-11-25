@@ -20,6 +20,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -122,6 +123,49 @@ class UploadFlowIntegrationTest {
                 .isEqualTo("payment-service");
         assertThat(stats.path("errorsOverTime").size()).isEqualTo(14);
         assertThat(stats.path("recentIncidents").size()).isEqualTo(5);
+        assertThat(stats.path("rangeDays").asInt()).isEqualTo(14);
+        assertThat(stats.path("resolvedInRange").asLong()).isZero();
+        assertThat(stats.path("mttrMinutes").isNull()).isTrue();
+
+        // Triage workflow: tags -> tag filter -> bulk resolution -> audit trail.
+        mockMvc.perform(put("/api/incidents/{id}/tags", incidentId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tags\":[\"Database\",\"payment\",\"database\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0]").value("database"))
+                .andExpect(jsonPath("$[1]").value("payment"));
+
+        mockMvc.perform(get("/api/incidents").param("tag", "database"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1));
+
+        mockMvc.perform(get("/api/incidents/tags"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0]").value("database"))
+                .andExpect(jsonPath("$[1]").value("payment"));
+
+        mockMvc.perform(patch("/api/incidents/bulk-status")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"ids\":[" + incidentId + "],\"status\":\"RESOLVED\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.updated").value(1))
+                .andExpect(jsonPath("$.status").value("RESOLVED"));
+
+        mockMvc.perform(get("/api/incidents/{id}", incidentId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("RESOLVED"))
+                .andExpect(jsonPath("$.resolvedAt").isNotEmpty())
+                .andExpect(jsonPath("$.tags.length()").value(2))
+                .andExpect(jsonPath("$.activities[?(@.type=='STATUS_CHANGED')]").exists())
+                .andExpect(jsonPath("$.activities[?(@.type=='TAG_ADDED')]").exists());
+
+        MvcResult rangeStatsResult = mockMvc.perform(get("/api/dashboard/stats").param("days", "7"))
+                .andExpect(status().isOk())
+                .andReturn();
+        JsonNode rangeStats = read(rangeStatsResult);
+        assertThat(rangeStats.path("rangeDays").asInt()).isEqualTo(7);
+        assertThat(rangeStats.path("resolvedInRange").asLong()).isEqualTo(1);
+        assertThat(rangeStats.path("mttrMinutes").isNumber()).isTrue();
 
         String secondLog = "2026-11-24 09:00:00 ERROR [payment-service] PaymentService - "
                 + "Database connection failed for order 9999\n";

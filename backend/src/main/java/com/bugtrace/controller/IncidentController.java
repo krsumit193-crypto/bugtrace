@@ -1,7 +1,10 @@
 package com.bugtrace.controller;
 
+import com.bugtrace.dto.request.BulkUpdateStatusRequest;
 import com.bugtrace.dto.request.CreateIncidentNoteRequest;
 import com.bugtrace.dto.request.UpdateIncidentStatusRequest;
+import com.bugtrace.dto.request.UpdateIncidentTagsRequest;
+import com.bugtrace.dto.response.BulkStatusResponse;
 import com.bugtrace.dto.response.IncidentDetailResponse;
 import com.bugtrace.dto.response.IncidentNoteResponse;
 import com.bugtrace.dto.response.IncidentSummaryResponse;
@@ -25,6 +28,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -32,6 +36,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/incidents")
@@ -49,12 +54,19 @@ public class IncidentController {
             @RequestParam(required = false) String q,
             @RequestParam(required = false) Severity severity,
             @RequestParam(required = false) IncidentStatus status,
+            @RequestParam(required = false) String tag,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
             @RequestParam(defaultValue = "latest") String sort,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
-        return incidentService.list(q, severity, status, from, to, sort, page, size);
+        return incidentService.list(q, severity, status, tag, from, to, sort, page, size);
+    }
+
+    /** Distinct tags, used by the frontend filter and tag editor suggestions. */
+    @GetMapping("/tags")
+    public List<String> tags() {
+        return incidentService.listTags();
     }
 
     @GetMapping("/{id}")
@@ -74,10 +86,11 @@ public class IncidentController {
             @RequestParam(required = false) String q,
             @RequestParam(required = false) Severity severity,
             @RequestParam(required = false) IncidentStatus status,
+            @RequestParam(required = false) String tag,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
             @RequestParam(defaultValue = "latest") String sort) {
-        IncidentExport export = incidentService.exportCsv(q, severity, status, from, to, sort);
+        IncidentExport export = incidentService.exportCsv(q, severity, status, tag, from, to, sort);
 
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
@@ -102,6 +115,19 @@ public class IncidentController {
     public IncidentSummaryResponse updateStatus(@PathVariable Long id,
                                                 @Valid @RequestBody UpdateIncidentStatusRequest request) {
         return incidentService.updateStatus(id, request.status());
+    }
+
+    /** Bulk status update for the incident table's selection toolbar. */
+    @PatchMapping("/bulk-status")
+    public BulkStatusResponse bulkUpdateStatus(@Valid @RequestBody BulkUpdateStatusRequest request) {
+        return incidentService.bulkUpdateStatus(request.ids(), request.status());
+    }
+
+    /** Replace the complete tag set of one incident. */
+    @PutMapping("/{id}/tags")
+    public List<String> replaceTags(@PathVariable Long id,
+                                    @Valid @RequestBody UpdateIncidentTagsRequest request) {
+        return incidentService.replaceTags(id, request.tags());
     }
 
     @PostMapping("/{id}/notes")

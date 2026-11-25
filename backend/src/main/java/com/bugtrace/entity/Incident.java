@@ -58,6 +58,10 @@ public class Incident {
     @Column(name = "last_seen", nullable = false)
     private Instant lastSeen;
 
+    /** Set when the incident is resolved, cleared when it is reopened. */
+    @Column(name = "resolved_at")
+    private Instant resolvedAt;
+
     @Version
     @Column(name = "version", nullable = false)
     private Long version;
@@ -157,6 +161,14 @@ public class Incident {
 
     public void setLastSeen(Instant lastSeen) {
         this.lastSeen = lastSeen;
+    }
+
+    public Instant getResolvedAt() {
+        return resolvedAt;
+    }
+
+    public void setResolvedAt(Instant resolvedAt) {
+        this.resolvedAt = resolvedAt;
     }
 
     public Long getVersion() {

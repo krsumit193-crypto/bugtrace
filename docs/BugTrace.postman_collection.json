@@ -65,13 +65,14 @@
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/api/incidents?q=connection&severity=ERROR&status=OPEN&from=2026-11-01&to=2026-11-30&sort=count&page=0&size=20",
+              "raw": "{{baseUrl}}/api/incidents?q=connection&severity=ERROR&status=OPEN&tag=database&from=2026-11-01&to=2026-11-30&sort=count&page=0&size=20",
               "host": ["{{baseUrl}}"],
               "path": ["api", "incidents"],
               "query": [
                 { "key": "q", "value": "connection" },
                 { "key": "severity", "value": "ERROR" },
                 { "key": "status", "value": "OPEN" },
+                { "key": "tag", "value": "database" },
                 { "key": "from", "value": "2026-11-01" },
                 { "key": "to", "value": "2026-11-30" },
                 { "key": "sort", "value": "count" },
@@ -79,7 +80,23 @@
                 { "key": "size", "value": "20" }
               ]
             },
-            "description": "All query parameters are optional. sort=latest|count."
+            "description": "All query parameters are optional. sort=latest|count. tag matches a lowercase incident tag."
+          }
+        },
+        {
+          "name": "List distinct tags",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/incidents/tags",
+            "description": "Returns a plain JSON array of tags used by the filter and tag editor."
+          }
+        },
+        {
+          "name": "Export filtered incidents as CSV",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/incidents/export?severity=ERROR&sort=count",
+            "description": "Same filters as the list endpoint. Capped at 5000 rows; X-Exported-Rows and X-Export-Truncated report the result."
           }
         },
         {
@@ -109,6 +126,32 @@
           }
         },
         {
+          "name": "Bulk update status",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ids\": [1, 2, 3],\n  \"status\": \"RESOLVED\"\n}"
+            },
+            "url": "{{baseUrl}}/api/incidents/bulk-status",
+            "description": "All-or-nothing for up to 100 ids. updated counts only incidents whose status actually changed."
+          }
+        },
+        {
+          "name": "Replace incident tags",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tags\": [\"database\", \"payment\"]\n}"
+            },
+            "url": "{{baseUrl}}/api/incidents/{{incidentId}}/tags",
+            "description": "Replaces the complete set. Send [] to clear; max 10 tags of a-z, 0-9, - or _."
+          }
+        },
+        {
           "name": "Add investigation note",
           "request": {
             "method": "POST",
@@ -129,8 +172,8 @@
           "name": "Get dashboard stats",
           "request": {
             "method": "GET",
-            "url": "{{baseUrl}}/api/dashboard/stats",
-            "description": "Every metric is derived from uploaded logs; an empty database returns zeros and empty arrays."
+            "url": "{{baseUrl}}/api/dashboard/stats?days=14",
+            "description": "days is clamped to 1-90. Range values cover incidentsInRange, resolvedInRange, mttrMinutes and errorsOverTime; all-time totals are unchanged."
           }
         }
       ]

@@ -45,8 +45,8 @@ API and a React dashboard.
 | A | Upload and parse | Validates `.log`/`.txt`, max 10 MB, rejects binary (NUL bytes), streams line by line, keeps raw lines, counts total/parsed/malformed lines. |
 | B | Severity | FATAL, ERROR, WARN, INFO, DEBUG; transparent keyword inference when a level is missing, flagged with `severityInferred`. |
 | C | Grouping | Normalizes messages, builds SHA-256 fingerprints, tracks count, first/last seen, severity and service; Jaccard similarity only suggests related incidents. |
-| D | Incident management | List, search, filter (severity/status/date), sort (latest/count), status changes, investigation notes, underlying entries, and CSV export of the filtered list. |
-| E | Dashboard | Totals, top repeated errors, errors by service, severity distribution, 14-day error trend and recent incidents — all computed from stored rows. |
+| D | Incident management | List, search, filter (severity/status/tag/date), sort (latest/count), status changes, bulk status updates, tags, investigation notes, an audit activity trail, underlying entries, and CSV export of the filtered list. |
+| E | Dashboard | Totals, top repeated errors, errors by service, severity distribution, a selectable 7/14/30/90-day window with incidents/resolutions in range, MTTR, error trend and recent incidents — all computed from stored rows. |
 | F | Upload history | Every file with status and counts; open a past upload to see the incidents it produced. |
 
 Cross-upload behaviour: the same fingerprint in a later upload **updates** the existing
@@ -80,16 +80,16 @@ bugtrace/
 │       │   ├── BugTraceApplication.java
 │       │   ├── config/        AppProperties, CorsConfig
 │       │   ├── controller/    UploadController, IncidentController, DashboardController
-│       │   ├── dto/request/   UpdateIncidentStatusRequest, CreateIncidentNoteRequest
+│       │   ├── dto/request/   Status, note, tag and bulk-update request DTOs
 │       │   ├── dto/response/  Records for every API response + PageResponse
-│       │   ├── entity/        LogUpload, LogEntry, Incident, IncidentNote
-│       │   ├── enums/         Severity, IncidentStatus, UploadStatus
+│       │   ├── entity/        LogUpload, LogEntry, Incident, IncidentNote, IncidentTag, IncidentActivity
+│       │   ├── enums/         Severity, IncidentStatus, UploadStatus, IncidentActivityType
 │       │   ├── exception/     ApiError, GlobalExceptionHandler, custom exceptions
 │       │   ├── parser/        LogLineParser, SeverityDetector, MessageNormalizer,
 │       │   │                  FingerprintGenerator, SimilarityScorer, ParsedLogLine, ParseResult
-│       │   ├── repository/    4 Spring Data repositories + IncidentSpecifications
+│       │   ├── repository/    6 Spring Data repositories + IncidentSpecifications
 │       │   └── service/       UploadService, IncidentService, DashboardService, grouping helpers
-│       ├── main/resources/   application.yml, db/migration/V1__init.sql
+│       ├── main/resources/   application.yml, db/migration/V1__init.sql, V2__triage.sql
 │       └── test/             parser, service, controller and integration tests; H2 config; sample log
 ├── frontend/
 │   ├── package.json, vite.config.js, index.html
@@ -119,7 +119,7 @@ bugtrace/
  Repository  ── parameterized Spring Data JPA queries / Specifications
         │
         ▼
- MySQL 8     ── schema owned by Flyway (V1__init.sql)
+ MySQL 8     ── schema owned by Flyway (V1__init.sql, V2__triage.sql)
 ```
 
 `GlobalExceptionHandler` is a single `@RestControllerAdvice` that converts every
@@ -167,13 +167,20 @@ Severity inference is intentionally simple and documented as a limitation.
 | Table | Purpose | Key relationships |
 | --- | --- | --- |
 | `log_upload` | One row per accepted file: UUID, filename, size, status, counts, timestamps. | 1 → N `log_entry` (`ON DELETE CASCADE`) |
-| `incident` | Global problem: fingerprint, title, sample, service, severity, status, count, first/last seen, `version`. | 1 → N `log_entry` (`ON DELETE SET NULL`), 1 → N `incident_note` (`CASCADE`) |
+| `incident` | Global problem: fingerprint, title, sample, service, severity, status, count, first/last seen, `resolved_at`, `version`. | 1 → N `log_entry` (`ON DELETE SET NULL`), 1 → N `incident_note` / `incident_tag` / `incident_activity` (`CASCADE`) |
 | `log_entry` | One parsed line: upload, optional incident, line number, timestamp, severity, flags, message, stack trace, raw line. | N → 1 upload / 0..1 incident |
 | `incident_note` | Investigation notes. | N → 1 incident |
+| `incident_tag` | Lowercase labels (`database`, `payment`) with a unique `(incident_id, tag)` pair. | N → 1 incident |
+| `incident_activity` | Append-only audit trail for status changes, notes and tag edits. | N → 1 incident |
 
-Migrations live in `backend/src/main/resources/db/migration/V1__init.sql`. Hibernate
+Migrations live in `backend/src/main/resources/db/migration/`: `V1__init.sql` creates the
+core schema and `V2__triage.sql` adds tags, the activity trail and `resolved_at`. Hibernate
 uses `ddl-auto=validate`, so entity and migration drift fails startup instead of being
 silently repaired.
+
+`resolved_at` is set when an incident moves to `RESOLVED` and cleared when it is reopened.
+That keeps MTTR a single indexed column read instead of a status-history join, at the cost
+of only tracking the **current** resolution (see Limitations).
 
 **Documented deviation from the brief's sample SQL:** `severity_inferred` is declared
 `BIT(1)` rather than `BOOLEAN`. Hibernate 6.6 maps a Java `boolean` to MySQL `bit`, while
@@ -215,13 +222,13 @@ export DB_USERNAME='bugtrace'
 export DB_PASSWORD='choose-a-strong-password'
 ```
 
-On startup Flyway creates the four tables and Hibernate validates them.
+On startup Flyway creates the six tables and Hibernate validates them.
 
 ### 2. Start the backend
 
 ```bash
 cd backend
-mvn clean verify                 # compiles, runs 35 tests, builds target/*.jar
+mvn clean verify                 # compiles, runs 60 tests, builds target/*.jar
 java -jar target/bugtrace-backend-1.0.0.jar
 # or: mvn spring-boot:run
 ```
@@ -268,13 +275,27 @@ All list endpoints return the same envelope:
 | POST | `/api/uploads` | Multipart upload (`file`) | 201 / 400, 413, 415 |
 | GET | `/api/uploads?page=0&size=20` | Upload history | 200 / 400 |
 | GET | `/api/uploads/{id}` | Upload detail + its incidents | 200 / 404 |
-| GET | `/api/incidents?q=&severity=&status=&from=&to=&sort=&page=&size=` | Search and filter | 200 / 400 |
-| GET | `/api/incidents/export?q=&severity=&status=&from=&to=&sort=` | Filtered incidents as a CSV download | 200 / 400 |
-| GET | `/api/incidents/{id}` | Incident detail, notes, related | 200 / 404 |
+| GET | `/api/incidents?q=&severity=&status=&tag=&from=&to=&sort=&page=&size=` | Search and filter | 200 / 400 |
+| GET | `/api/incidents/tags` | Distinct tags for filters and suggestions | 200 |
+| GET | `/api/incidents/export?q=&severity=&status=&tag=&from=&to=&sort=` | Filtered incidents as a CSV download | 200 / 400 |
+| GET | `/api/incidents/{id}` | Incident detail, tags, notes, activity, related | 200 / 404 |
 | GET | `/api/incidents/{id}/entries?page=0&size=20` | Underlying log entries | 200 / 404 |
 | PATCH | `/api/incidents/{id}/status` | Body `{"status":"INVESTIGATING"}` | 200 / 400, 404 |
+| PATCH | `/api/incidents/bulk-status` | Body `{"ids":[1,2],"status":"RESOLVED"}` (max 100 ids) | 200 / 400, 404 |
+| PUT | `/api/incidents/{id}/tags` | Body `{"tags":["database","payment"]}` (replaces the set) | 200 / 400, 404 |
 | POST | `/api/incidents/{id}/notes` | Body `{"noteText":"..."}` | 201 / 400, 404 |
-| GET | `/api/dashboard/stats` | All dashboard metrics | 200 |
+| GET | `/api/dashboard/stats?days=14` | All dashboard metrics for a 1–90 day window | 200 / 400 |
+
+### Triage workflow
+
+Tags are lowercase, 1–32 characters of `a-z`, `0-9`, `-` or `_`, de-duplicated per incident
+and capped at 10. `PUT /api/incidents/{id}/tags` replaces the complete set, so removing a
+tag is just omitting it from the list. Bulk status updates are all-or-nothing: if any id is
+missing the whole request fails with `404` instead of applying a partial change.
+
+Every status change, note and tag addition/removal appends a row to `incident_activity`,
+which the detail page renders as the **Activity** panel. `resolved_at` and the dashboard
+MTTR use the same transition, so the audit trail and the metric cannot disagree.
 
 ### CSV export
 
@@ -351,19 +372,20 @@ cd ../frontend
 npm run build
 ```
 
-Actual output from this project on 2026-11-23:
+Actual output from this project on 2026-11-25:
 
 ```text
-Tests run: 4, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.controller.IncidentControllerTest
+Tests run: 10, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.controller.IncidentControllerTest
 Tests run: 1, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.integration.UploadFlowIntegrationTest
 Tests run: 4, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.parser.FingerprintGeneratorTest
 Tests run: 7, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.parser.LogLineParserTest
 Tests run: 3, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.parser.MessageNormalizerTest
 Tests run: 3, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.parser.SeverityDetectorTest
 Tests run: 4, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.parser.SimilarityScorerTest
+Tests run: 7, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.service.IncidentCsvExporterTest
 Tests run: 3, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.service.IncidentGrouperTest
-Tests run: 6, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.service.IncidentServiceTest
-Tests run: 35, Failures: 0, Errors: 0, Skipped: 0
+Tests run: 18, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.service.IncidentServiceTest
+Tests run: 60, Failures: 0, Errors: 0, Skipped: 0
 BUILD SUCCESS
 ```
 
@@ -380,9 +402,10 @@ dist/assets/index-*.js          720.30 kB (gzip: 209.48 kB)
 
 Tests cover: valid and malformed parsing, stack traces, severity detection and
 inference, normalization stability, fingerprint stability and level separation,
-duplicate grouping, service behaviour (Mockito), controller validation/status codes and
-the full upload → incident → note → dashboard HTTP flow on H2, including the
-same-fingerprint-across-two-uploads case.
+duplicate grouping, service behaviour (Mockito), tag normalization and validation,
+bulk status semantics, activity recording, controller validation/status codes and
+the full upload → incident → tag → bulk-resolve → dashboard HTTP flow on H2,
+including the same-fingerprint-across-two-uploads case.
 
 ### Real MySQL verification (completed)
 
@@ -445,6 +468,11 @@ the same values as H2: 3 uploads, 35 lines, 27 parsed entries, 2 malformed lines
 - Search uses `LIKE %term%` and cannot use a normal index; fine at student scale.
 - Keyword-based severity inference is heuristic and will not understand every message.
 - Related-incident suggestions are heuristic and are never merged automatically.
+- **MTTR tracks the current resolution only.** Reopening an incident clears `resolved_at`, so
+  a later resolution replaces the earlier one; there is no immutable status-history table.
+- `V2__triage.sql` was validated by Hibernate against the H2 schema used in tests. It has
+  not yet been replayed against a live MySQL 8 server (the V1 verification below predates
+  tags and activities).
 - The frontend production bundle emits Vite's 500 kB chunk warning because Recharts is
   large; it still builds and runs correctly.
 
@@ -455,7 +483,7 @@ the same values as H2: 3 uploads, 35 lines, 27 parsed entries, 2 malformed lines
 3. Add `FULLTEXT` indexes for message search.
 4. Move upload processing to an asynchronous queue with progress polling.
 5. Add authentication (Spring Security) and per-user workspaces.
-6. Add alerting rules, CSV export and saved dashboard filters.
+6. Add alerting rules, saved dashboard filters and scheduled reports.
 7. Code-split the Recharts bundle to remove the chunk-size warning.
 
 ## Screenshots checklist
@@ -502,6 +530,24 @@ Follow-up: incident CSV export.
   `mvn test` and `npm run build` still pass.
 
 Build still passes with `npm run build` (the documented Recharts chunk warning remains).
+
+Follow-up: triage workflow and dashboard ranges.
+
+- Incidents now carry up to 10 lowercase tags. The list has a tag filter, a tag column and
+  multi-select checkboxes with a bulk status toolbar (all-or-nothing, max 100 ids).
+- The detail page has an inline tag editor, a **Resolved** row with time-to-resolve and an
+  **Activity** panel fed by an append-only audit trail (status, notes, tags).
+- The dashboard accepts `?days=7|14|30|90` and adds incidents in range, resolutions in
+  range and MTTR. MTTR is the mean first-seen → resolved time for incidents resolved
+  inside the selected window; it renders `—` when there are none.
+- Backend: `V2__triage.sql`, `IncidentTag`/`IncidentActivity` entities, two repositories,
+  a correlated-subquery tag filter, and status transitions that maintain `resolved_at`.
+- Frontend: new API methods, tag chips, selection/bulk states, activity timeline, range
+  selector and `formatDuration`, all with busy/error/empty states.
+- Tests grew from 35 to 60: tag normalization/removal, bulk status counting and missing-id
+  failure, resolved-at clearing on reopen, controller validation, and the integration test
+  now runs tag → filter → bulk resolve → activity → ranged dashboard. `mvn test` and
+  `npm run build` pass.
 
 ## Documentation index
 
