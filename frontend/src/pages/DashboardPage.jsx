@@ -15,7 +15,7 @@ import {
   YAxis,
 } from 'recharts';
 import { api } from '../api';
-import { SeverityBadge, StatusBadge } from '../components/Badges';
+import { SeverityBadge, SnoozeBadge, StatusBadge } from '../components/Badges';
 import { EmptyState, ErrorState, LoadingState, PageHeader } from '../components/States';
 import StatCard from '../components/StatCard';
 import useAsync from '../hooks/useAsync';
@@ -45,6 +45,7 @@ function MiniIncidentList({ items, emptyMessage }) {
             <span className="incident-mini-meta">
               <SeverityBadge severity={item.severity} />
               <StatusBadge status={item.status} />
+              <SnoozeBadge snoozed={item.snoozed} until={item.snoozedUntil} />
               <span className="count-pill">×{formatNumber(item.occurrenceCount)}</span>
             </span>
           </Link>
@@ -126,7 +127,7 @@ export default function DashboardPage() {
         <StatCard
           label="Unique incidents"
           value={formatNumber(stats.uniqueIncidents)}
-          hint={`${formatNumber(stats.openIncidents)} still open`}
+          hint={`${formatNumber(stats.openIncidents)} open · ${formatNumber(stats.snoozedIncidents)} snoozed`}
         />
         <StatCard
           label="ERROR + FATAL"

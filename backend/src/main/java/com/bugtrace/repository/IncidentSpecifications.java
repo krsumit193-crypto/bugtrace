@@ -26,11 +26,23 @@ public final class IncidentSpecifications {
     public static Specification<Incident> filter(String query, Severity severity,
                                                  IncidentStatus status,
                                                  Instant from, Instant toExclusive) {
-        return filter(query, severity, status, null, from, toExclusive);
+        return filter(query, severity, status, null, null, null, from, toExclusive);
     }
 
     public static Specification<Incident> filter(String query, Severity severity,
                                                  IncidentStatus status, String tag,
+                                                 Instant from, Instant toExclusive) {
+        return filter(query, severity, status, tag, null, null, from, toExclusive);
+    }
+
+    /**
+     * @param snoozed {@code TRUE} keeps only incidents muted at {@code now},
+     *                {@code FALSE} keeps only active ones, {@code null} keeps both
+     * @param now     reference instant for snooze comparisons
+     */
+    public static Specification<Incident> filter(String query, Severity severity,
+                                                 IncidentStatus status, String tag,
+                                                 Boolean snoozed, Instant now,
                                                  Instant from, Instant toExclusive) {
         return (root, criteriaQuery, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
@@ -57,6 +69,17 @@ public final class IncidentSpecifications {
                 tagged.select(tagRoot.get("incidentId"))
                         .where(cb.equal(tagRoot.get("tag"), tag.strip().toLowerCase(Locale.ROOT)));
                 predicates.add(root.get("id").in(tagged));
+            }
+            if (snoozed != null) {
+                Instant reference = now == null ? Instant.now() : now;
+                if (snoozed) {
+                    predicates.add(cb.greaterThan(root.get("snoozedUntil"), reference));
+                } else {
+                    // A past snooze has expired, so it counts as active again.
+                    predicates.add(cb.or(
+                            cb.isNull(root.get("snoozedUntil")),
+                            cb.lessThanOrEqualTo(root.get("snoozedUntil"), reference)));
+                }
             }
             if (from != null) {
                 predicates.add(cb.greaterThanOrEqualTo(root.get("lastSeen"), from));

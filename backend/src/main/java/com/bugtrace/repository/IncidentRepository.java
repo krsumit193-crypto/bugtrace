@@ -22,6 +22,8 @@ public interface IncidentRepository extends JpaRepository<Incident, Long>,
 
     long countByStatus(IncidentStatus status);
 
+    long countBySnoozedUntilAfter(Instant now);
+
     long countByLastSeenGreaterThanEqual(Instant from);
 
     List<Incident> findByStatusAndResolvedAtGreaterThanEqual(IncidentStatus status, Instant from);

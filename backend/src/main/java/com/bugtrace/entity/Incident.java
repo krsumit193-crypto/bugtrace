@@ -62,6 +62,13 @@ public class Incident {
     @Column(name = "resolved_at")
     private Instant resolvedAt;
 
+    /**
+     * Muted until this instant. NULL or a past value means the incident is
+     * active; expired snoozes therefore need no background job.
+     */
+    @Column(name = "snoozed_until")
+    private Instant snoozedUntil;
+
     @Version
     @Column(name = "version", nullable = false)
     private Long version;
@@ -169,6 +176,14 @@ public class Incident {
 
     public void setResolvedAt(Instant resolvedAt) {
         this.resolvedAt = resolvedAt;
+    }
+
+    public Instant getSnoozedUntil() {
+        return snoozedUntil;
+    }
+
+    public void setSnoozedUntil(Instant snoozedUntil) {
+        this.snoozedUntil = snoozedUntil;
     }
 
     public Long getVersion() {

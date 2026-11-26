@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, exportIncidents } from '../api';
-import { SeverityBadge, StatusBadge } from '../components/Badges';
+import { SeverityBadge, SnoozeBadge, StatusBadge } from '../components/Badges';
 import Pagination from '../components/Pagination';
 import { EmptyState, ErrorState, LoadingState, PageHeader } from '../components/States';
 import useAsync from '../hooks/useAsync';
@@ -14,6 +14,7 @@ const initialFilters = {
   severity: '',
   status: '',
   tag: '',
+  snoozed: '',
   from: '',
   to: '',
   sort: 'latest',
@@ -175,6 +176,14 @@ export default function IncidentsPage() {
             </select>
           </label>
           <label>
+            Snooze
+            <select value={draft.snoozed} onChange={(event) => update('snoozed', event.target.value)}>
+              <option value="">Any</option>
+              <option value="false">Active only</option>
+              <option value="true">Snoozed only</option>
+            </select>
+          </label>
+          <label>
             Sort by
             <select value={draft.sort} onChange={(event) => update('sort', event.target.value)}>
               <option value="latest">Latest seen</option>
@@ -316,10 +325,18 @@ export default function IncidentsPage() {
                           />
                         </td>
                         <td>
-                          <Link to={`/incidents/${incident.id}`} className="table-link">
-                            {incident.title}
-                          </Link>
-                          <div className="cell-subtitle">#{incident.id}</div>
+                          <div className="title-line">
+                            <Link to={`/incidents/${incident.id}`} className="table-link">
+                              {incident.title}
+                            </Link>
+                            <SnoozeBadge snoozed={incident.snoozed} until={incident.snoozedUntil} />
+                          </div>
+                          <div className="cell-subtitle">
+                            #{incident.id}
+                            {incident.snoozed
+                              ? ` · until ${formatDateTime(incident.snoozedUntil)}`
+                              : ''}
+                          </div>
                         </td>
                         <td>{incident.serviceName ?? 'unknown'}</td>
                         <td><SeverityBadge severity={incident.severity} /></td>

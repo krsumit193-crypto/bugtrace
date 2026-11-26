@@ -1,7 +1,10 @@
 package com.bugtrace.controller;
 
 import com.bugtrace.dto.response.BulkStatusResponse;
+import com.bugtrace.dto.response.IncidentSummaryResponse;
+import com.bugtrace.entity.Incident;
 import com.bugtrace.enums.IncidentStatus;
+import com.bugtrace.enums.Severity;
 import com.bugtrace.exception.ResourceNotFoundException;
 import com.bugtrace.service.IncidentExport;
 import com.bugtrace.service.IncidentService;
@@ -13,8 +16,11 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.time.Instant;
+
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -77,7 +83,7 @@ class IncidentControllerTest {
                         .getBytes(java.nio.charset.StandardCharsets.UTF_8),
                 1,
                 false);
-        when(incidentService.exportCsv(any(), any(), any(), any(), any(), any(), any()))
+        when(incidentService.exportCsv(any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(export);
 
         mockMvc.perform(get("/api/incidents/export").param("severity", "ERROR"))
@@ -92,7 +98,7 @@ class IncidentControllerTest {
 
     @Test
     void exportRejectsInvertedDateRange() throws Exception {
-        when(incidentService.exportCsv(any(), any(), any(), any(), any(), any(), any()))
+        when(incidentService.exportCsv(any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenThrow(new com.bugtrace.exception.InvalidRequestException(
                         "'from' must be on or before 'to'."));
 
@@ -147,5 +153,63 @@ class IncidentControllerTest {
                         .content("{\"tags\":[\"Database\"]}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0]").value("database"));
+    }
+
+    @Test
+    void snoozeRejectsMissingHours() throws Exception {
+        mockMvc.perform(patch("/api/incidents/1/snooze")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.hours").exists());
+    }
+
+    @Test
+    void snoozeRejectsHoursAboveTheMaximum() throws Exception {
+        mockMvc.perform(patch("/api/incidents/1/snooze")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"hours\":999}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.hours").exists());
+    }
+
+    @Test
+    void snoozeReturnsTheUpdatedIncident() throws Exception {
+        when(incidentService.snooze(1L, 24)).thenReturn(summary(true));
+
+        mockMvc.perform(patch("/api/incidents/1/snooze")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"hours\":24}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.snoozed").value(true))
+                .andExpect(jsonPath("$.snoozedUntil").exists());
+    }
+
+    @Test
+    void unsnoozeReturnsTheUpdatedIncident() throws Exception {
+        when(incidentService.unsnooze(1L)).thenReturn(summary(false));
+
+        mockMvc.perform(delete("/api/incidents/1/snooze"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.snoozed").value(false))
+                .andExpect(jsonPath("$.snoozedUntil").value(org.hamcrest.Matchers.nullValue()));
+    }
+
+    private IncidentSummaryResponse summary(boolean snoozed) {
+        Incident incident = new Incident(
+                "a".repeat(64),
+                "Database connection failed",
+                "Database connection failed",
+                "payment-service",
+                Severity.ERROR,
+                IncidentStatus.OPEN,
+                3,
+                Instant.parse("2026-11-23T10:00:00Z"),
+                Instant.parse("2026-11-23T10:05:00Z"));
+        incident.setId(1L);
+        if (snoozed) {
+            incident.setSnoozedUntil(Instant.now().plusSeconds(3_600));
+        }
+        return IncidentSummaryResponse.from(incident);
     }
 }

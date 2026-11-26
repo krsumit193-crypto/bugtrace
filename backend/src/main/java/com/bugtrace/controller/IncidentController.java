@@ -2,6 +2,7 @@ package com.bugtrace.controller;
 
 import com.bugtrace.dto.request.BulkUpdateStatusRequest;
 import com.bugtrace.dto.request.CreateIncidentNoteRequest;
+import com.bugtrace.dto.request.SnoozeIncidentRequest;
 import com.bugtrace.dto.request.UpdateIncidentStatusRequest;
 import com.bugtrace.dto.request.UpdateIncidentTagsRequest;
 import com.bugtrace.dto.response.BulkStatusResponse;
@@ -24,6 +25,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -55,12 +57,13 @@ public class IncidentController {
             @RequestParam(required = false) Severity severity,
             @RequestParam(required = false) IncidentStatus status,
             @RequestParam(required = false) String tag,
+            @RequestParam(required = false) Boolean snoozed,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
             @RequestParam(defaultValue = "latest") String sort,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
-        return incidentService.list(q, severity, status, tag, from, to, sort, page, size);
+        return incidentService.list(q, severity, status, tag, snoozed, from, to, sort, page, size);
     }
 
     /** Distinct tags, used by the frontend filter and tag editor suggestions. */
@@ -87,10 +90,11 @@ public class IncidentController {
             @RequestParam(required = false) Severity severity,
             @RequestParam(required = false) IncidentStatus status,
             @RequestParam(required = false) String tag,
+            @RequestParam(required = false) Boolean snoozed,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
             @RequestParam(defaultValue = "latest") String sort) {
-        IncidentExport export = incidentService.exportCsv(q, severity, status, tag, from, to, sort);
+        IncidentExport export = incidentService.exportCsv(q, severity, status, tag, snoozed, from, to, sort);
 
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
@@ -115,6 +119,19 @@ public class IncidentController {
     public IncidentSummaryResponse updateStatus(@PathVariable Long id,
                                                 @Valid @RequestBody UpdateIncidentStatusRequest request) {
         return incidentService.updateStatus(id, request.status());
+    }
+
+    /** Mute an incident for a number of hours (1–720). */
+    @PatchMapping("/{id}/snooze")
+    public IncidentSummaryResponse snooze(@PathVariable Long id,
+                                          @Valid @RequestBody SnoozeIncidentRequest request) {
+        return incidentService.snooze(id, request.hours());
+    }
+
+    /** Wake a snoozed incident immediately. */
+    @DeleteMapping("/{id}/snooze")
+    public IncidentSummaryResponse unsnooze(@PathVariable Long id) {
+        return incidentService.unsnooze(id);
     }
 
     /** Bulk status update for the incident table's selection toolbar. */

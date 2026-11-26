@@ -7,5 +7,7 @@ public enum IncidentActivityType {
     STATUS_CHANGED,
     NOTE_ADDED,
     TAG_ADDED,
-    TAG_REMOVED
+    TAG_REMOVED,
+    SNOOZED,
+    UNSNOOZED
 }

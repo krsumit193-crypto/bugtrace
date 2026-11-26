@@ -45,7 +45,7 @@ API and a React dashboard.
 | A | Upload and parse | Validates `.log`/`.txt`, max 10 MB, rejects binary (NUL bytes), streams line by line, keeps raw lines, counts total/parsed/malformed lines. |
 | B | Severity | FATAL, ERROR, WARN, INFO, DEBUG; transparent keyword inference when a level is missing, flagged with `severityInferred`. |
 | C | Grouping | Normalizes messages, builds SHA-256 fingerprints, tracks count, first/last seen, severity and service; Jaccard similarity only suggests related incidents. |
-| D | Incident management | List, search, filter (severity/status/tag/date), sort (latest/count), status changes, bulk status updates, tags, investigation notes, an audit activity trail, underlying entries, and CSV export of the filtered list. |
+| D | Incident management | List, search, filter (severity/status/tag/snooze/date), sort (latest/count), status changes, bulk status updates, tags, investigation notes, snooze/mute, an audit activity trail, underlying entries, and CSV export of the filtered list. |
 | E | Dashboard | Totals, top repeated errors, errors by service, severity distribution, a selectable 7/14/30/90-day window with incidents/resolutions in range, MTTR, error trend and recent incidents — all computed from stored rows. |
 | F | Upload history | Every file with status and counts; open a past upload to see the incidents it produced. |
 
@@ -275,12 +275,14 @@ All list endpoints return the same envelope:
 | POST | `/api/uploads` | Multipart upload (`file`) | 201 / 400, 413, 415 |
 | GET | `/api/uploads?page=0&size=20` | Upload history | 200 / 400 |
 | GET | `/api/uploads/{id}` | Upload detail + its incidents | 200 / 404 |
-| GET | `/api/incidents?q=&severity=&status=&tag=&from=&to=&sort=&page=&size=` | Search and filter | 200 / 400 |
+| GET | `/api/incidents?q=&severity=&status=&tag=&snoozed=&from=&to=&sort=&page=&size=` | Search and filter (`snoozed=true/false`) | 200 / 400 |
 | GET | `/api/incidents/tags` | Distinct tags for filters and suggestions | 200 |
-| GET | `/api/incidents/export?q=&severity=&status=&tag=&from=&to=&sort=` | Filtered incidents as a CSV download | 200 / 400 |
+| GET | `/api/incidents/export?q=&severity=&status=&tag=&snoozed=&from=&to=&sort=` | Filtered incidents as a CSV download | 200 / 400 |
 | GET | `/api/incidents/{id}` | Incident detail, tags, notes, activity, related | 200 / 404 |
 | GET | `/api/incidents/{id}/entries?page=0&size=20` | Underlying log entries | 200 / 404 |
 | PATCH | `/api/incidents/{id}/status` | Body `{"status":"INVESTIGATING"}` | 200 / 400, 404 |
+| PATCH | `/api/incidents/{id}/snooze` | Body `{"hours":24}` (1–720), mutes the incident | 200 / 400, 404 |
+| DELETE | `/api/incidents/{id}/snooze` | Wakes a snoozed incident immediately | 200 / 404 |
 | PATCH | `/api/incidents/bulk-status` | Body `{"ids":[1,2],"status":"RESOLVED"}` (max 100 ids) | 200 / 400, 404 |
 | PUT | `/api/incidents/{id}/tags` | Body `{"tags":["database","payment"]}` (replaces the set) | 200 / 400, 404 |
 | POST | `/api/incidents/{id}/notes` | Body `{"noteText":"..."}` | 201 / 400, 404 |
@@ -296,6 +298,17 @@ missing the whole request fails with `404` instead of applying a partial change.
 Every status change, note and tag addition/removal appends a row to `incident_activity`,
 which the detail page renders as the **Activity** panel. `resolved_at` and the dashboard
 MTTR use the same transition, so the audit trail and the metric cannot disagree.
+
+### Snoozing
+
+`PATCH /api/incidents/{id}/snooze` with `{"hours":24}` mutes an incident for 1–720
+hours. Snoozed incidents stay in the database and keep accumulating occurrences, but
+`GET /api/incidents?snoozed=false` returns only active ones and `snoozed=true` returns
+only muted ones. Expiry needs no scheduler: every query compares `snoozed_until` with
+the current time, so an expired snooze is active again automatically. `DELETE` on the
+same path wakes an incident early. Snoozing a `RESOLVED` incident is rejected, and
+resolving an incident clears any snooze. Both actions are recorded in the activity trail,
+and the dashboard shows the number of currently snoozed incidents.
 
 ### CSV export
 

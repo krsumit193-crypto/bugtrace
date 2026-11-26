@@ -18,6 +18,7 @@ public record DashboardStatsResponse(
         long totalEntries,
         long uniqueIncidents,
         long openIncidents,
+        long snoozedIncidents,
         long warnEntries,
         long errorEntries,
         long fatalEntries,

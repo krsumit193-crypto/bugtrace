@@ -17,6 +17,8 @@ public record IncidentSummaryResponse(
         Instant firstSeen,
         Instant lastSeen,
         Instant resolvedAt,
+        Instant snoozedUntil,
+        boolean snoozed,
         List<String> tags
 ) {
 
@@ -25,6 +27,7 @@ public record IncidentSummaryResponse(
     }
 
     public static IncidentSummaryResponse from(Incident incident, List<String> tags) {
+        Instant snoozedUntil = incident.getSnoozedUntil();
         return new IncidentSummaryResponse(
                 incident.getId(),
                 incident.getTitle(),
@@ -35,6 +38,8 @@ public record IncidentSummaryResponse(
                 incident.getFirstSeen(),
                 incident.getLastSeen(),
                 incident.getResolvedAt(),
+                snoozedUntil,
+                snoozedUntil != null && snoozedUntil.isAfter(Instant.now()),
                 tags == null ? List.of() : List.copyOf(tags)
         );
     }

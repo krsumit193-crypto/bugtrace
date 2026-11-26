@@ -19,6 +19,8 @@ public record IncidentDetailResponse(
         Instant firstSeen,
         Instant lastSeen,
         Instant resolvedAt,
+        Instant snoozedUntil,
+        boolean snoozed,
         List<String> tags,
         List<IncidentNoteResponse> notes,
         List<IncidentActivityResponse> activities,
@@ -30,6 +32,7 @@ public record IncidentDetailResponse(
                                               List<IncidentNoteResponse> notes,
                                               List<IncidentActivityResponse> activities,
                                               List<RelatedIncidentResponse> relatedIncidents) {
+        Instant snoozedUntil = incident.getSnoozedUntil();
         return new IncidentDetailResponse(
                 incident.getId(),
                 incident.getFingerprint(),
@@ -42,6 +45,8 @@ public record IncidentDetailResponse(
                 incident.getFirstSeen(),
                 incident.getLastSeen(),
                 incident.getResolvedAt(),
+                snoozedUntil,
+                snoozedUntil != null && snoozedUntil.isAfter(Instant.now()),
                 tags == null ? List.of() : List.copyOf(tags),
                 notes,
                 activities,

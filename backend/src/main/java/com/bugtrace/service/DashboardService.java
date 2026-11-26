@@ -74,6 +74,7 @@ public class DashboardService {
         long totalEntries = logEntryRepository.count();
         long uniqueIncidents = incidentRepository.count();
         long openIncidents = incidentRepository.countByStatus(IncidentStatus.OPEN);
+        long snoozedIncidents = incidentRepository.countBySnoozedUntilAfter(Instant.now());
 
         long warnEntries = logEntryRepository.countBySeverity(Severity.WARN);
         long errorEntries = logEntryRepository.countBySeverity(Severity.ERROR);
@@ -94,6 +95,7 @@ public class DashboardService {
                 totalEntries,
                 uniqueIncidents,
                 openIncidents,
+                snoozedIncidents,
                 warnEntries,
                 errorEntries,
                 fatalEntries,

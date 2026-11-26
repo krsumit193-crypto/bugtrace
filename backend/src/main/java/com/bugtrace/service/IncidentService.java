@@ -36,6 +36,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
 import java.time.DateTimeException;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -69,6 +70,8 @@ public class IncidentService {
     private static final int MAX_TAGS = 10;
     private static final int MAX_TAG_LENGTH = 32;
     private static final int MAX_ACTIVITY_DETAIL = 500;
+    /** Longest snooze accepted: 30 days. */
+    private static final int MAX_SNOOZE_HOURS = 720;
     private static final Pattern TAG_PATTERN =
             Pattern.compile("[a-z0-9][a-z0-9_-]{0," + (MAX_TAG_LENGTH - 1) + "}");
 
@@ -106,7 +109,7 @@ public class IncidentService {
                                                        IncidentStatus status,
                                                        LocalDate from, LocalDate to,
                                                        String sort, int page, int size) {
-        return list(query, severity, status, null, from, to, sort, page, size);
+        return list(query, severity, status, null, null, from, to, sort, page, size);
     }
 
     @Transactional(readOnly = true)
@@ -114,9 +117,23 @@ public class IncidentService {
                                                        IncidentStatus status, String tag,
                                                        LocalDate from, LocalDate to,
                                                        String sort, int page, int size) {
+        return list(query, severity, status, tag, null, from, to, sort, page, size);
+    }
+
+    /**
+     * @param snoozed {@code TRUE} keeps only snoozed incidents, {@code FALSE}
+     *                keeps only active ones, {@code null} keeps both
+     */
+    @Transactional(readOnly = true)
+    public PageResponse<IncidentSummaryResponse> list(String query, Severity severity,
+                                                       IncidentStatus status, String tag,
+                                                       Boolean snoozed,
+                                                       LocalDate from, LocalDate to,
+                                                       String sort, int page, int size) {
         validatePaging(page, size);
 
-        Specification<Incident> specification = buildSpecification(query, severity, status, tag, from, to);
+        Specification<Incident> specification =
+                buildSpecification(query, severity, status, tag, snoozed, from, to);
         Pageable pageable = PageRequest.of(page, size, resolveSort(sort));
         Page<Incident> incidents = incidentRepository.findAll(specification, pageable);
 
@@ -134,13 +151,21 @@ public class IncidentService {
     @Transactional(readOnly = true)
     public IncidentExport exportCsv(String query, Severity severity, IncidentStatus status,
                                     LocalDate from, LocalDate to, String sort) {
-        return exportCsv(query, severity, status, null, from, to, sort);
+        return exportCsv(query, severity, status, null, null, from, to, sort);
     }
 
     @Transactional(readOnly = true)
     public IncidentExport exportCsv(String query, Severity severity, IncidentStatus status, String tag,
                                     LocalDate from, LocalDate to, String sort) {
-        Specification<Incident> specification = buildSpecification(query, severity, status, tag, from, to);
+        return exportCsv(query, severity, status, tag, null, from, to, sort);
+    }
+
+    @Transactional(readOnly = true)
+    public IncidentExport exportCsv(String query, Severity severity, IncidentStatus status, String tag,
+                                    Boolean snoozed,
+                                    LocalDate from, LocalDate to, String sort) {
+        Specification<Incident> specification =
+                buildSpecification(query, severity, status, tag, snoozed, from, to);
 
         // Fetch one extra row so truncation can be reported without a count query.
         Pageable pageable = PageRequest.of(0, MAX_EXPORT_ROWS + 1, resolveSort(sort));
@@ -171,6 +196,41 @@ public class IncidentService {
                 .map(IncidentActivityResponse::from)
                 .toList();
         return IncidentDetailResponse.from(incident, tags, notes, activities, findRelated(incident));
+    }
+
+    /**
+     * Mute an incident until the given number of hours have passed. Resolved
+     * incidents are rejected because there is nothing left to silence.
+     */
+    @Transactional
+    public IncidentSummaryResponse snooze(Long id, Integer hours) {
+        if (hours == null || hours < 1 || hours > MAX_SNOOZE_HOURS) {
+            throw new InvalidRequestException(
+                    "'hours' must be between 1 and " + MAX_SNOOZE_HOURS + ".");
+        }
+        Incident incident = findIncident(id);
+        if (incident.getStatus() == IncidentStatus.RESOLVED) {
+            throw new InvalidRequestException("Resolved incidents cannot be snoozed.");
+        }
+
+        Instant until = Instant.now().plus(Duration.ofHours(hours));
+        incident.setSnoozedUntil(until);
+        recordActivity(incident.getId(), IncidentActivityType.SNOOZED,
+                "Snoozed for " + hours + "h (until " + until + ")");
+        return IncidentSummaryResponse.from(incident, tagsFor(incident));
+    }
+
+    /** Clear a snooze immediately. Clearing an active incident is a no-op. */
+    @Transactional
+    public IncidentSummaryResponse unsnooze(Long id) {
+        Incident incident = findIncident(id);
+        boolean wasSnoozed = incident.getSnoozedUntil() != null
+                && incident.getSnoozedUntil().isAfter(Instant.now());
+        incident.setSnoozedUntil(null);
+        if (wasSnoozed) {
+            recordActivity(incident.getId(), IncidentActivityType.UNSNOOZED, "Snooze cleared");
+        }
+        return IncidentSummaryResponse.from(incident, tagsFor(incident));
     }
 
     @Transactional(readOnly = true)
@@ -307,6 +367,8 @@ public class IncidentService {
         incident.setStatus(status);
         if (status == IncidentStatus.RESOLVED) {
             incident.setResolvedAt(Instant.now());
+            // A resolved incident is already out of the active queue.
+            incident.setSnoozedUntil(null);
         } else {
             incident.setResolvedAt(null);
         }
@@ -359,6 +421,7 @@ public class IncidentService {
 
     private Specification<Incident> buildSpecification(String query, Severity severity,
                                                        IncidentStatus status, String tag,
+                                                       Boolean snoozed,
                                                        LocalDate from, LocalDate to) {
         if (from != null && to != null && from.isAfter(to)) {
             throw new InvalidRequestException("'from' must be on or before 'to'.");
@@ -368,7 +431,8 @@ public class IncidentService {
         Instant toExclusive = to == null ? null : to.plusDays(1).atStartOfDay(zoneId).toInstant();
         String normalizedTag = tag == null || tag.isBlank() ? null : normalizeTag(tag);
         return IncidentSpecifications.filter(
-                query, severity, status, normalizedTag, fromInstant, toExclusive);
+                query, severity, status, normalizedTag, snoozed, Instant.now(),
+                fromInstant, toExclusive);
     }
 
     private String normalizeTag(String rawTag) {

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../api';
-import { SeverityBadge, StatusBadge } from '../components/Badges';
+import { SeverityBadge, SnoozeBadge, StatusBadge } from '../components/Badges';
 import Pagination from '../components/Pagination';
 import { EmptyState, ErrorState, LoadingState, PageHeader } from '../components/States';
 import useAsync from '../hooks/useAsync';
@@ -15,6 +15,8 @@ const ACTIVITY_LABELS = {
   NOTE_ADDED: 'Note added',
   TAG_ADDED: 'Tag added',
   TAG_REMOVED: 'Tag removed',
+  SNOOZED: 'Snoozed',
+  UNSNOOZED: 'Snooze cleared',
 };
 
 function timeToResolve(incident) {
@@ -32,6 +34,7 @@ export default function IncidentDetailPage() {
   const [entriesPage, setEntriesPage] = useState(0);
   const [noteText, setNoteText] = useState('');
   const [tagInput, setTagInput] = useState('');
+  const [snoozeHours, setSnoozeHours] = useState(24);
   const [actionError, setActionError] = useState(null);
   const [busy, setBusy] = useState(false);
 
@@ -46,6 +49,32 @@ export default function IncidentDetailPage() {
     setActionError(null);
     try {
       await api.updateIncidentStatus(incidentId, status);
+      incidentState.reload();
+    } catch (cause) {
+      setActionError(cause.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function snooze() {
+    setBusy(true);
+    setActionError(null);
+    try {
+      await api.snoozeIncident(incidentId, snoozeHours);
+      incidentState.reload();
+    } catch (cause) {
+      setActionError(cause.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function unsnooze() {
+    setBusy(true);
+    setActionError(null);
+    try {
+      await api.unsnoozeIncident(incidentId);
       incidentState.reload();
     } catch (cause) {
       setActionError(cause.message);
@@ -191,6 +220,50 @@ export default function IncidentDetailPage() {
               </select>
             </div>
           </div>
+          {incident.status !== 'RESOLVED' ? (
+            <div className="detail-row">
+              <span>Snooze</span>
+              <div className="inline-control">
+                {incident.snoozed ? (
+                  <>
+                    <SnoozeBadge snoozed until={incident.snoozedUntil} />
+                    <span className="muted">{formatDateTime(incident.snoozedUntil)}</span>
+                    <button
+                      type="button"
+                      className="button button-ghost"
+                      disabled={busy}
+                      onClick={unsnooze}
+                    >
+                      Wake now
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <select
+                      aria-label="Snooze duration"
+                      value={snoozeHours}
+                      disabled={busy}
+                      onChange={(event) => setSnoozeHours(Number(event.target.value))}
+                    >
+                      <option value={1}>1 hour</option>
+                      <option value={4}>4 hours</option>
+                      <option value={24}>24 hours</option>
+                      <option value={72}>3 days</option>
+                      <option value={168}>7 days</option>
+                    </select>
+                    <button
+                      type="button"
+                      className="button button-ghost"
+                      disabled={busy}
+                      onClick={snooze}
+                    >
+                      Snooze
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          ) : null}
           <div className="detail-row detail-row-wide">
             <span>Tags</span>
             <div className="tag-editor">

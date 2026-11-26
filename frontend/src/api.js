@@ -119,6 +119,13 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ status }),
     }),
+  snoozeIncident: (id, hours) =>
+    request(`/api/incidents/${id}/snooze`, {
+      method: 'PATCH',
+      body: JSON.stringify({ hours }),
+    }),
+  unsnoozeIncident: (id) =>
+    request(`/api/incidents/${id}/snooze`, { method: 'DELETE' }),
   bulkUpdateIncidentStatus: (ids, status) =>
     request('/api/incidents/bulk-status', {
       method: 'PATCH',

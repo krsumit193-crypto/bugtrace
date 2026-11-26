@@ -26,6 +26,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
@@ -282,6 +283,82 @@ class IncidentServiceTest {
         when(tagRepository.findDistinctTags()).thenReturn(List.of("database", "payment"));
 
         assertThat(service.listTags()).containsExactly("database", "payment");
+    }
+
+    @Test
+    void snoozingSetsUntilAndRecordsActivity() {
+        Incident incident = incident(1L);
+        when(incidentRepository.findById(1L)).thenReturn(Optional.of(incident));
+
+        Instant before = Instant.now();
+        IncidentSummaryResponse response = service.snooze(1L, 24);
+
+        assertThat(incident.getSnoozedUntil()).isAfter(before.plus(Duration.ofHours(23)));
+        assertThat(response.snoozed()).isTrue();
+        assertThat(response.snoozedUntil()).isEqualTo(incident.getSnoozedUntil());
+        ArgumentCaptor<IncidentActivity> activity = ArgumentCaptor.forClass(IncidentActivity.class);
+        verify(activityRepository).save(activity.capture());
+        assertThat(activity.getValue().getType()).isEqualTo(IncidentActivityType.SNOOZED);
+    }
+
+    @Test
+    void snoozeRejectsInvalidHours() {
+        assertThatThrownBy(() -> service.snooze(1L, 0))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessageContaining("hours");
+        assertThatThrownBy(() -> service.snooze(1L, null))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessageContaining("hours");
+        assertThatThrownBy(() -> service.snooze(1L, 721))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessageContaining("hours");
+    }
+
+    @Test
+    void snoozeRejectsResolvedIncident() {
+        Incident incident = incident(1L);
+        incident.setStatus(IncidentStatus.RESOLVED);
+        when(incidentRepository.findById(1L)).thenReturn(Optional.of(incident));
+
+        assertThatThrownBy(() -> service.snooze(1L, 4))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessageContaining("Resolved");
+    }
+
+    @Test
+    void unsnoozeClearsTheSnoozeAndRecordsActivity() {
+        Incident incident = incident(1L);
+        incident.setSnoozedUntil(Instant.now().plus(Duration.ofHours(2)));
+        when(incidentRepository.findById(1L)).thenReturn(Optional.of(incident));
+
+        IncidentSummaryResponse response = service.unsnooze(1L);
+
+        assertThat(incident.getSnoozedUntil()).isNull();
+        assertThat(response.snoozed()).isFalse();
+        ArgumentCaptor<IncidentActivity> activity = ArgumentCaptor.forClass(IncidentActivity.class);
+        verify(activityRepository).save(activity.capture());
+        assertThat(activity.getValue().getType()).isEqualTo(IncidentActivityType.UNSNOOZED);
+    }
+
+    @Test
+    void unsnoozeOnAnActiveIncidentDoesNotRecordActivity() {
+        Incident incident = incident(1L);
+        when(incidentRepository.findById(1L)).thenReturn(Optional.of(incident));
+
+        service.unsnooze(1L);
+
+        verify(activityRepository, never()).save(any(IncidentActivity.class));
+    }
+
+    @Test
+    void resolvingAnIncidentClearsASnooze() {
+        Incident incident = incident(1L);
+        incident.setSnoozedUntil(Instant.now().plus(Duration.ofHours(5)));
+        when(incidentRepository.findById(1L)).thenReturn(Optional.of(incident));
+
+        service.updateStatus(1L, IncidentStatus.RESOLVED);
+
+        assertThat(incident.getSnoozedUntil()).isNull();
     }
 
     private Incident incident(Long id) {

@@ -126,6 +126,26 @@
           }
         },
         {
+          "name": "Snooze incident",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"hours\": 24\n}"
+            },
+            "url": "{{baseUrl}}/api/incidents/{{incidentId}}/snooze",
+            "description": "Mutes the incident for 1-720 hours. Resolved incidents cannot be snoozed."
+          }
+        },
+        {
+          "name": "Wake snoozed incident",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/api/incidents/{{incidentId}}/snooze"
+          }
+        },
+        {
           "name": "Bulk update status",
           "request": {
             "method": "PATCH",

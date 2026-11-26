@@ -16,10 +16,10 @@ import org.springframework.test.web.servlet.MvcResult;
 import java.nio.charset.StandardCharsets;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -158,6 +158,56 @@ class UploadFlowIntegrationTest {
                 .andExpect(jsonPath("$.tags.length()").value(2))
                 .andExpect(jsonPath("$.activities[?(@.type=='STATUS_CHANGED')]").exists())
                 .andExpect(jsonPath("$.activities[?(@.type=='TAG_ADDED')]").exists());
+
+        // Snooze workflow: resolved incidents are rejected, active ones are muted,
+        // and the list/export filters plus dashboard count agree.
+        mockMvc.perform(patch("/api/incidents/{id}/snooze", incidentId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"hours\":4}"))
+                .andExpect(status().isBadRequest());
+
+        MvcResult openListResult = mockMvc.perform(get("/api/incidents").param("status", "OPEN"))
+                .andExpect(status().isOk())
+                .andReturn();
+        long snoozeId = read(openListResult).path("content").get(0).path("id").asLong();
+
+        mockMvc.perform(patch("/api/incidents/{id}/snooze", snoozeId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"hours\":24}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.snoozed").value(true))
+                .andExpect(jsonPath("$.snoozedUntil").isNotEmpty());
+
+        mockMvc.perform(get("/api/incidents").param("snoozed", "true"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1));
+        mockMvc.perform(get("/api/incidents").param("snoozed", "false"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(4));
+        mockMvc.perform(get("/api/incidents/export").param("snoozed", "true"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("X-Exported-Rows", "1"));
+        mockMvc.perform(get("/api/incidents/export").param("snoozed", "false"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("X-Exported-Rows", "4"));
+
+        MvcResult snoozedStatsResult = mockMvc.perform(get("/api/dashboard/stats"))
+                .andExpect(status().isOk())
+                .andReturn();
+        assertThat(read(snoozedStatsResult).path("snoozedIncidents").asLong()).isEqualTo(1);
+
+        mockMvc.perform(get("/api/incidents/{id}", snoozeId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.activities[?(@.type=='SNOOZED')]").exists());
+
+        mockMvc.perform(delete("/api/incidents/{id}/snooze", snoozeId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.snoozed").value(false))
+                .andExpect(jsonPath("$.snoozedUntil").doesNotExist());
+
+        mockMvc.perform(get("/api/incidents").param("snoozed", "true"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(0));
 
         MvcResult rangeStatsResult = mockMvc.perform(get("/api/dashboard/stats").param("days", "7"))
                 .andExpect(status().isOk())
