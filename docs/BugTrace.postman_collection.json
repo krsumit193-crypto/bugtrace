@@ -186,6 +186,20 @@
       ]
     },
     {
+      "name": "Log entries",
+      "item": [
+        {
+          "name": "Search raw log entries",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/entries?q=&severity=&serviceName=&uploadId=&incidentId=&from=&to=&sort=latest&page=0&size=20",
+            "description": "Matches message, raw line, service and logger (case-insensitive), including INFO/DEBUG lines that never became incidents. sort=latest|oldest|line, size max 100."
+          }
+        }
+      ]
+    },
+    {
       "name": "Dashboard",
       "item": [
         {

@@ -159,9 +159,17 @@ export default function IncidentDetailPage() {
         title={incident.title}
         description="Exact fingerprint matches only. Similar incidents below are suggestions, never merged automatically."
         actions={
-          <Link className="button button-ghost" to="/incidents">
-            ← Back to incidents
-          </Link>
+          <>
+            <Link className="button button-ghost" to="/incidents">
+              ← Back to incidents
+            </Link>
+            <Link
+              className="button button-ghost"
+              to={`/entries?q=${encodeURIComponent(incident.sampleMessage)}`}
+            >
+              Search all entries
+            </Link>
+          </>
         }
       />
 

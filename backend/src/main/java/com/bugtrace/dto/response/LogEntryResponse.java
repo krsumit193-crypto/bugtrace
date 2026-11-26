@@ -8,6 +8,7 @@ import java.time.Instant;
 public record LogEntryResponse(
         Long id,
         Long uploadId,
+        Long incidentId,
         String uploadFilename,
         int lineNumber,
         Instant loggedAt,
@@ -24,6 +25,7 @@ public record LogEntryResponse(
         return new LogEntryResponse(
                 entry.getId(),
                 entry.getUpload().getId(),
+                entry.getIncident() == null ? null : entry.getIncident().getId(),
                 entry.getUpload().getOriginalFilename(),
                 entry.getLineNumber(),
                 entry.getLoggedAt(),

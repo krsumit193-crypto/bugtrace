@@ -143,6 +143,7 @@ export const api = {
     }),
 
   listUploads: (params) => request(`/api/uploads${query(params)}`),
+  searchEntries: (params) => request(`/api/entries${query(params)}`),
   getUpload: (id) => request(`/api/uploads/${id}`),
   uploadLog: (file) => {
     const form = new FormData();

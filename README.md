@@ -48,6 +48,7 @@ API and a React dashboard.
 | D | Incident management | List, search, filter (severity/status/tag/snooze/date), sort (latest/count), status changes, bulk status updates, tags, investigation notes, snooze/mute, an audit activity trail, underlying entries, and CSV export of the filtered list. |
 | E | Dashboard | Totals, top repeated errors, errors by service, severity distribution, a selectable 7/14/30/90-day window with incidents/resolutions in range, MTTR, error trend and recent incidents — all computed from stored rows. |
 | F | Upload history | Every file with status and counts; open a past upload to see the incidents it produced. |
+| G | Log entry search | Full-text search over every stored line across all uploads, including INFO/DEBUG lines that never become incidents; filters for severity, service, upload, incident and date range, three sort orders and pagination. |
 
 Cross-upload behaviour: the same fingerprint in a later upload **updates** the existing
 incident instead of creating a duplicate. This is asserted by an integration test.
@@ -79,7 +80,7 @@ bugtrace/
 │       ├── main/java/com/bugtrace/
 │       │   ├── BugTraceApplication.java
 │       │   ├── config/        AppProperties, CorsConfig
-│       │   ├── controller/    UploadController, IncidentController, DashboardController
+│       │   ├── controller/    UploadController, IncidentController, LogEntryController, DashboardController
 │       │   ├── dto/request/   Status, note, tag and bulk-update request DTOs
 │       │   ├── dto/response/  Records for every API response + PageResponse
 │       │   ├── entity/        LogUpload, LogEntry, Incident, IncidentNote, IncidentTag, IncidentActivity
@@ -87,9 +88,11 @@ bugtrace/
 │       │   ├── exception/     ApiError, GlobalExceptionHandler, custom exceptions
 │       │   ├── parser/        LogLineParser, SeverityDetector, MessageNormalizer,
 │       │   │                  FingerprintGenerator, SimilarityScorer, ParsedLogLine, ParseResult
-│       │   ├── repository/    6 Spring Data repositories + IncidentSpecifications
-│       │   └── service/       UploadService, IncidentService, DashboardService, grouping helpers
-│       ├── main/resources/   application.yml, db/migration/V1__init.sql, V2__triage.sql
+│       │   ├── repository/    6 Spring Data repositories + IncidentSpecifications,
+│       │   │                  LogEntrySpecifications
+│       │   └── service/       UploadService, IncidentService, LogEntrySearchService,
+│       │                      DashboardService, grouping helpers
+│       ├── main/resources/   application.yml, db/migration/V1–V3 SQL migrations
 │       └── test/             parser, service, controller and integration tests; H2 config; sample log
 ├── frontend/
 │   ├── package.json, vite.config.js, index.html
@@ -280,6 +283,7 @@ All list endpoints return the same envelope:
 | GET | `/api/incidents/export?q=&severity=&status=&tag=&snoozed=&from=&to=&sort=` | Filtered incidents as a CSV download | 200 / 400 |
 | GET | `/api/incidents/{id}` | Incident detail, tags, notes, activity, related | 200 / 404 |
 | GET | `/api/incidents/{id}/entries?page=0&size=20` | Underlying log entries | 200 / 404 |
+| GET | `/api/entries?q=&severity=&serviceName=&uploadId=&incidentId=&from=&to=&sort=&page=&size=` | Search raw log lines across all uploads (`sort=latest/oldest/line`) | 200 / 400 |
 | PATCH | `/api/incidents/{id}/status` | Body `{"status":"INVESTIGATING"}` | 200 / 400, 404 |
 | PATCH | `/api/incidents/{id}/snooze` | Body `{"hours":24}` (1–720), mutes the incident | 200 / 400, 404 |
 | DELETE | `/api/incidents/{id}/snooze` | Wakes a snoozed incident immediately | 200 / 404 |
@@ -287,6 +291,18 @@ All list endpoints return the same envelope:
 | PUT | `/api/incidents/{id}/tags` | Body `{"tags":["database","payment"]}` (replaces the set) | 200 / 400, 404 |
 | POST | `/api/incidents/{id}/notes` | Body `{"noteText":"..."}` | 201 / 400, 404 |
 | GET | `/api/dashboard/stats?days=14` | All dashboard metrics for a 1–90 day window | 200 / 400 |
+
+### Entry search
+
+`GET /api/entries` answers a different question from incident search: which exact line said
+this. The free-text term is matched case-insensitively (with `LIKE` wildcards escaped)
+against the parsed message, the raw line, the service and the logger, so INFO and DEBUG
+entries that never became incidents are searchable too. Severity, partial service name,
+upload id, incident id and an inclusive date range (`from`/`to`, interpreted in the
+configured `app.log.timezone`) combine into one query; `sort=line` restores original file
+order. Paging is capped at 100 rows per request, and an inverted range returns `400`
+instead of a silent empty page. The **Log entries** page exposes the same filters and
+links each hit back to its upload and, when present, its incident.
 
 ### Triage workflow
 
@@ -385,10 +401,12 @@ cd ../frontend
 npm run build
 ```
 
-Actual output from this project on 2026-11-25:
+Actual output from this project on 2026-11-26:
 
 ```text
-Tests run: 10, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.controller.IncidentControllerTest
+Tests run: 14, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.controller.IncidentControllerTest
+Tests run: 4, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.controller.LogEntryControllerTest
+Tests run: 1, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.integration.LogEntrySearchIntegrationTest
 Tests run: 1, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.integration.UploadFlowIntegrationTest
 Tests run: 4, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.parser.FingerprintGeneratorTest
 Tests run: 7, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.parser.LogLineParserTest
@@ -397,8 +415,8 @@ Tests run: 3, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.parser.Severity
 Tests run: 4, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.parser.SimilarityScorerTest
 Tests run: 7, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.service.IncidentCsvExporterTest
 Tests run: 3, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.service.IncidentGrouperTest
-Tests run: 18, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.service.IncidentServiceTest
-Tests run: 60, Failures: 0, Errors: 0, Skipped: 0
+Tests run: 24, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.service.IncidentServiceTest
+Tests run: 75, Failures: 0, Errors: 0, Skipped: 0
 BUILD SUCCESS
 ```
 
@@ -406,11 +424,11 @@ Frontend build:
 
 ```text
 vite v8.3.8 building client environment for production...
-✓ 434 modules transformed.
-dist/index.html                   0.57 kB
-dist/assets/index-*.css           9.98 kB
-dist/assets/index-*.js          720.30 kB (gzip: 209.48 kB)
-✓ built in 486ms
+✓ 435 modules transformed.
+dist/index.html                   0.57 kB │ gzip:   0.35 kB
+dist/assets/index-*.css          12.61 kB │ gzip:   3.34 kB
+dist/assets/index-*.js          736.09 kB │ gzip: 213.08 kB
+✓ built in 1.01s
 ```
 
 Tests cover: valid and malformed parsing, stack traces, severity detection and
@@ -418,7 +436,10 @@ inference, normalization stability, fingerprint stability and level separation,
 duplicate grouping, service behaviour (Mockito), tag normalization and validation,
 bulk status semantics, activity recording, controller validation/status codes and
 the full upload → incident → tag → bulk-resolve → dashboard HTTP flow on H2,
-including the same-fingerprint-across-two-uploads case.
+including the same-fingerprint-across-two-uploads case. Entry-search tests assert
+combined text/severity/service/upload/date filters, INFO-line visibility, `sort=line`
+ordering, paging limits and the inverted-range `400`; the two integration classes use
+private H2 databases so their counts cannot leak into each other.
 
 ### Real MySQL verification (completed)
 
@@ -512,6 +533,7 @@ Capture these after uploading the three sample logs (`docs/screenshots/`):
 - [ ] `07-upload-history.png` — list of the three uploads and their counts.
 - [ ] `08-upload-detail.png` — one upload with its incident list.
 - [ ] `09-mobile.png` — responsive sidebar/navigation at phone width.
+- [x] `10-log-entries.jpg` — raw log entry search with severity filter and incident links.
 
 ## Recent improvements
 
@@ -561,6 +583,24 @@ Follow-up: triage workflow and dashboard ranges.
   failure, resolved-at clearing on reopen, controller validation, and the integration test
   now runs tag → filter → bulk resolve → activity → ranged dashboard. `mvn test` and
   `npm run build` pass.
+
+Follow-up: global log entry search.
+
+- New `GET /api/entries` endpoint searches the `log_entry` table directly, so raw lines can
+  be found without going through an incident. Free text matches message, raw line, service
+  and logger; severity, service, upload, incident and date range filters compose, with
+  `latest`/`oldest`/`line` sort orders and paging capped at 100.
+- `LogEntrySpecifications` builds only parameterized `LIKE`/equality predicates and escapes
+  user-supplied wildcards, mirroring the incident filter behaviour.
+- `LogEntryResponse` now exposes `incidentId`, letting the UI link a hit to its incident.
+- The frontend gained a **Log entries** page (sidebar + `/entries` route) with a collapsible
+  raw line/stack trace view and links to the source upload, plus a "Search all entries"
+  shortcut from incident detail.
+- Tests grew from 70 to 75: four MockMvc tests for filter delegation, invalid severity and
+  paging validation, and one H2 integration test covering every filter, INFO-only lines,
+  original-order sorting and inverted-range rejection. Both integration classes now use
+  separate in-memory databases after the shared one caused cross-test count leakage.
+  `mvn clean verify` → 75/75 pass; `npm run build` succeeds.
 
 ## Documentation index
 

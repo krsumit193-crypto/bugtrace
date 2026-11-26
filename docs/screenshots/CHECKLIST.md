@@ -12,3 +12,4 @@ They are intentionally not committed yet — add the PNGs before final submissio
 - [ ] `07-upload-history.png` — list of the three uploads and their counts.
 - [ ] `08-upload-detail.png` — one upload with its incident list.
 - [ ] `09-mobile.png` — responsive sidebar/navigation at phone width.
+- [x] `10-log-entries.jpg` — raw log entry search with severity filter and incident links.

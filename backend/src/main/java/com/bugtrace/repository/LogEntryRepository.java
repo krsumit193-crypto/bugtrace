@@ -5,8 +5,10 @@ import com.bugtrace.entity.LogEntry;
 import com.bugtrace.enums.Severity;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -17,7 +19,13 @@ import java.util.List;
 /**
  * Entry-level queries used by incident details and dashboard aggregates.
  */
-public interface LogEntryRepository extends JpaRepository<LogEntry, Long> {
+public interface LogEntryRepository extends JpaRepository<LogEntry, Long>,
+        JpaSpecificationExecutor<LogEntry> {
+
+    /** Specification search with the upload eagerly fetched for response DTOs. */
+    @Override
+    @EntityGraph(attributePaths = "upload")
+    Page<LogEntry> findAll(Specification<LogEntry> spec, Pageable pageable);
 
     @EntityGraph(attributePaths = "upload")
     Page<LogEntry> findByIncidentId(Long incidentId, Pageable pageable);

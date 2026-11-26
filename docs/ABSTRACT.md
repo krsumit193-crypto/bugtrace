@@ -14,7 +14,8 @@ all dashboard numbers are aggregates computed from stored log entries, so an emp
 database produces honest zero values and meaningful empty states rather than mock data.
 Incidents can be searched, filtered, sorted, assigned a status and annotated with
 investigation notes. A token-similarity scorer suggests possibly related incidents but
-never merges them automatically.
+never merges them automatically. Raw stored lines are searchable independently of
+incidents, so the exact INFO/DEBUG line behind a symptom can still be found.
 
 The project demonstrates a complete, testable pipeline: parsing and grouping utilities
 have focused unit tests, and an H2 integration test exercises upload → parse → group →
@@ -39,7 +40,8 @@ service is failing or whether a problem is recurring across files.
    no level is present.
 4. Group repeated WARN/ERROR/FATAL messages into global incidents using normalization
    plus SHA-256 fingerprints; keep INFO/DEBUG as entries only.
-5. Provide a searchable, filterable incident API and a dashboard with real aggregates.
+5. Provide a searchable, filterable incident API, an independent raw-entry search and a
+   dashboard with real aggregates.
 6. Offer a responsive React UI with loading, error and empty states for every view.
 
 **Out of scope:** authentication, microservices, Kafka, Kubernetes, distributed file

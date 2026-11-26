@@ -4,6 +4,7 @@ import { PageHeader } from './components/States';
 import DashboardPage from './pages/DashboardPage';
 import IncidentDetailPage from './pages/IncidentDetailPage';
 import IncidentsPage from './pages/IncidentsPage';
+import LogEntriesPage from './pages/LogEntriesPage';
 import UploadDetailPage from './pages/UploadDetailPage';
 import UploadHistoryPage from './pages/UploadHistoryPage';
 import UploadPage from './pages/UploadPage';
@@ -25,6 +26,7 @@ export default function App() {
         <Route path="upload" element={<UploadPage />} />
         <Route path="incidents" element={<IncidentsPage />} />
         <Route path="incidents/:id" element={<IncidentDetailPage />} />
+        <Route path="entries" element={<LogEntriesPage />} />
         <Route path="uploads" element={<UploadHistoryPage />} />
         <Route path="uploads/:id" element={<UploadDetailPage />} />
         <Route path="*" element={<NotFoundPage />} />
