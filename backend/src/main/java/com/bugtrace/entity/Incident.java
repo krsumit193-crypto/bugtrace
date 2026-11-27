@@ -69,6 +69,10 @@ public class Incident {
     @Column(name = "snoozed_until")
     private Instant snoozedUntil;
 
+    /** Free-text owner of this incident, e.g. a teammate's name or handle. */
+    @Column(name = "assignee", length = 100)
+    private String assignee;
+
     @Version
     @Column(name = "version", nullable = false)
     private Long version;
@@ -184,6 +188,14 @@ public class Incident {
 
     public void setSnoozedUntil(Instant snoozedUntil) {
         this.snoozedUntil = snoozedUntil;
+    }
+
+    public String getAssignee() {
+        return assignee;
+    }
+
+    public void setAssignee(String assignee) {
+        this.assignee = assignee;
     }
 
     public Long getVersion() {
