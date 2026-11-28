@@ -45,7 +45,7 @@ API and a React dashboard.
 | A | Upload and parse | Validates `.log`/`.txt`, max 10 MB, rejects binary (NUL bytes), streams line by line, keeps raw lines, counts total/parsed/malformed lines. |
 | B | Severity | FATAL, ERROR, WARN, INFO, DEBUG; transparent keyword inference when a level is missing, flagged with `severityInferred`. |
 | C | Grouping | Normalizes messages, builds SHA-256 fingerprints, tracks count, first/last seen, severity and service; Jaccard similarity only suggests related incidents. |
-| D | Incident management | List, search, filter (severity/status/tag/snooze/date), sort (latest/count), status changes, bulk status updates, tags, investigation notes, snooze/mute, an audit activity trail, underlying entries, and CSV export of the filtered list. |
+| D | Incident management | List, search, filter (severity/status/tag/assignee/snooze/date), sort (latest/count), status changes, bulk status updates, tags, assignee ownership, investigation notes, snooze/mute, an audit activity trail, underlying entries, and CSV export of the filtered list. |
 | E | Dashboard | Totals, top repeated errors, errors by service, severity distribution, a selectable 7/14/30/90-day window with incidents/resolutions in range, MTTR, error trend and recent incidents — all computed from stored rows. |
 | F | Upload history | Every file with status and counts; open a past upload to see the incidents it produced. |
 | G | Log entry search | Full-text search over every stored line across all uploads, including INFO/DEBUG lines that never become incidents; filters for severity, service, upload, incident and date range, three sort orders and pagination. |
@@ -92,7 +92,7 @@ bugtrace/
 │       │   │                  LogEntrySpecifications
 │       │   └── service/       UploadService, IncidentService, LogEntrySearchService,
 │       │                      DashboardService, grouping helpers
-│       ├── main/resources/   application.yml, db/migration/V1–V3 SQL migrations
+│       ├── main/resources/   application.yml, db/migration/V1–V4 SQL migrations
 │       └── test/             parser, service, controller and integration tests; H2 config; sample log
 ├── frontend/
 │   ├── package.json, vite.config.js, index.html
@@ -278,15 +278,18 @@ All list endpoints return the same envelope:
 | POST | `/api/uploads` | Multipart upload (`file`) | 201 / 400, 413, 415 |
 | GET | `/api/uploads?page=0&size=20` | Upload history | 200 / 400 |
 | GET | `/api/uploads/{id}` | Upload detail + its incidents | 200 / 404 |
-| GET | `/api/incidents?q=&severity=&status=&tag=&snoozed=&from=&to=&sort=&page=&size=` | Search and filter (`snoozed=true/false`) | 200 / 400 |
+| GET | `/api/incidents?q=&severity=&status=&tag=&assignee=&snoozed=&from=&to=&sort=&page=&size=` | Search and filter (`assignee` is case-insensitive, `snoozed=true/false`) | 200 / 400 |
 | GET | `/api/incidents/tags` | Distinct tags for filters and suggestions | 200 |
-| GET | `/api/incidents/export?q=&severity=&status=&tag=&snoozed=&from=&to=&sort=` | Filtered incidents as a CSV download | 200 / 400 |
+| GET | `/api/incidents/assignees` | Distinct assignees for the owner filter | 200 |
+| GET | `/api/incidents/export?q=&severity=&status=&tag=&assignee=&snoozed=&from=&to=&sort=` | Filtered incidents as a CSV download (includes `assignee`) | 200 / 400 |
 | GET | `/api/incidents/{id}` | Incident detail, tags, notes, activity, related | 200 / 404 |
 | GET | `/api/incidents/{id}/entries?page=0&size=20` | Underlying log entries | 200 / 404 |
 | GET | `/api/entries?q=&severity=&serviceName=&uploadId=&incidentId=&from=&to=&sort=&page=&size=` | Search raw log lines across all uploads (`sort=latest/oldest/line`) | 200 / 400 |
 | PATCH | `/api/incidents/{id}/status` | Body `{"status":"INVESTIGATING"}` | 200 / 400, 404 |
 | PATCH | `/api/incidents/{id}/snooze` | Body `{"hours":24}` (1–720), mutes the incident | 200 / 400, 404 |
 | DELETE | `/api/incidents/{id}/snooze` | Wakes a snoozed incident immediately | 200 / 404 |
+| PATCH | `/api/incidents/{id}/assignee` | Body `{"assignee":"alice"}` (1–100 characters, trimmed) | 200 / 400, 404 |
+| DELETE | `/api/incidents/{id}/assignee` | Clears the current owner | 200 / 404 |
 | PATCH | `/api/incidents/bulk-status` | Body `{"ids":[1,2],"status":"RESOLVED"}` (max 100 ids) | 200 / 400, 404 |
 | PUT | `/api/incidents/{id}/tags` | Body `{"tags":["database","payment"]}` (replaces the set) | 200 / 400, 404 |
 | POST | `/api/incidents/{id}/notes` | Body `{"noteText":"..."}` | 201 / 400, 404 |
@@ -311,9 +314,18 @@ and capped at 10. `PUT /api/incidents/{id}/tags` replaces the complete set, so r
 tag is just omitting it from the list. Bulk status updates are all-or-nothing: if any id is
 missing the whole request fails with `404` instead of applying a partial change.
 
-Every status change, note and tag addition/removal appends a row to `incident_activity`,
-which the detail page renders as the **Activity** panel. `resolved_at` and the dashboard
-MTTR use the same transition, so the audit trail and the metric cannot disagree.
+Every status change, note, ownership change and tag addition/removal appends a row to
+`incident_activity`, which the detail page renders as the **Activity** panel. `resolved_at`
+and the dashboard MTTR use the same status transition, so the audit trail and the metric
+cannot disagree.
+
+### Ownership
+
+`PATCH /api/incidents/{id}/assignee` with `{"assignee":"alice"}` sets a free-text owner
+(1–100 characters, trimmed); `DELETE` clears it. Re-applying the same owner is a no-op,
+so the audit trail only records real changes. The incident list and CSV export accept
+`assignee=alice` as a case-insensitive exact match, and `GET /api/incidents/assignees`
+returns the distinct owners used by the filter dropdown.
 
 ### Snoozing
 
@@ -401,10 +413,10 @@ cd ../frontend
 npm run build
 ```
 
-Actual output from this project on 2026-11-26:
+Actual output from this project on 2026-11-28:
 
 ```text
-Tests run: 14, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.controller.IncidentControllerTest
+Tests run: 19, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.controller.IncidentControllerTest
 Tests run: 4, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.controller.LogEntryControllerTest
 Tests run: 1, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.integration.LogEntrySearchIntegrationTest
 Tests run: 1, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.integration.UploadFlowIntegrationTest
@@ -413,10 +425,10 @@ Tests run: 7, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.parser.LogLineP
 Tests run: 3, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.parser.MessageNormalizerTest
 Tests run: 3, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.parser.SeverityDetectorTest
 Tests run: 4, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.parser.SimilarityScorerTest
-Tests run: 7, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.service.IncidentCsvExporterTest
+Tests run: 8, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.service.IncidentCsvExporterTest
 Tests run: 3, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.service.IncidentGrouperTest
-Tests run: 24, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.service.IncidentServiceTest
-Tests run: 75, Failures: 0, Errors: 0, Skipped: 0
+Tests run: 29, Failures: 0, Errors: 0, Skipped: 0 -- com.bugtrace.service.IncidentServiceTest
+Tests run: 86, Failures: 0, Errors: 0, Skipped: 0
 BUILD SUCCESS
 ```
 
@@ -426,9 +438,9 @@ Frontend build:
 vite v8.3.8 building client environment for production...
 ✓ 435 modules transformed.
 dist/index.html                   0.57 kB │ gzip:   0.35 kB
-dist/assets/index-*.css          12.61 kB │ gzip:   3.34 kB
-dist/assets/index-*.js          736.09 kB │ gzip: 213.08 kB
-✓ built in 1.01s
+dist/assets/index-*.css          12.81 kB │ gzip:   3.37 kB
+dist/assets/index-*.js          737.91 kB │ gzip: 213.41 kB
+✓ built in 2.75s
 ```
 
 Tests cover: valid and malformed parsing, stack traces, severity detection and

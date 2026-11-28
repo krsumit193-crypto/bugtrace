@@ -361,6 +361,65 @@ class IncidentServiceTest {
         assertThat(incident.getSnoozedUntil()).isNull();
     }
 
+    @Test
+    void assigningTrimsTheOwnerAndRecordsActivity() {
+        Incident incident = incident(1L);
+        when(incidentRepository.findById(1L)).thenReturn(Optional.of(incident));
+
+        IncidentSummaryResponse response = service.assign(1L, "  alice  ");
+
+        assertThat(incident.getAssignee()).isEqualTo("alice");
+        assertThat(response.assignee()).isEqualTo("alice");
+        ArgumentCaptor<IncidentActivity> activity = ArgumentCaptor.forClass(IncidentActivity.class);
+        verify(activityRepository).save(activity.capture());
+        assertThat(activity.getValue().getType()).isEqualTo(IncidentActivityType.ASSIGNED);
+        assertThat(activity.getValue().getDetail()).contains("alice");
+    }
+
+    @Test
+    void reassigningTheSameOwnerDoesNotRecordActivity() {
+        Incident incident = incident(1L);
+        incident.setAssignee("alice");
+        when(incidentRepository.findById(1L)).thenReturn(Optional.of(incident));
+
+        service.assign(1L, "alice");
+
+        verify(activityRepository, never()).save(any(IncidentActivity.class));
+    }
+
+    @Test
+    void unassigningClearsTheOwnerAndRecordsActivity() {
+        Incident incident = incident(1L);
+        incident.setAssignee("alice");
+        when(incidentRepository.findById(1L)).thenReturn(Optional.of(incident));
+
+        IncidentSummaryResponse response = service.unassign(1L);
+
+        assertThat(incident.getAssignee()).isNull();
+        assertThat(response.assignee()).isNull();
+        ArgumentCaptor<IncidentActivity> activity = ArgumentCaptor.forClass(IncidentActivity.class);
+        verify(activityRepository).save(activity.capture());
+        assertThat(activity.getValue().getType()).isEqualTo(IncidentActivityType.UNASSIGNED);
+    }
+
+    @Test
+    void assignRejectsBlankAndTooLongOwners() {
+        assertThatThrownBy(() -> service.assign(1L, "   "))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessageContaining("assignee");
+        assertThatThrownBy(() -> service.assign(1L, "a".repeat(101)))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessageContaining("at most");
+        verify(incidentRepository, never()).findById(any());
+    }
+
+    @Test
+    void listAssigneesReturnsTheDistinctRepositoryResult() {
+        when(incidentRepository.findDistinctAssignees()).thenReturn(List.of("alice", "bob"));
+
+        assertThat(service.listAssignees()).containsExactly("alice", "bob");
+    }
+
     private Incident incident(Long id) {
         Incident incident = new Incident(
                 "a".repeat(64),

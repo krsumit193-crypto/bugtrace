@@ -14,6 +14,7 @@ const initialFilters = {
   severity: '',
   status: '',
   tag: '',
+  assignee: '',
   snoozed: '',
   from: '',
   to: '',
@@ -49,6 +50,8 @@ export default function IncidentsPage() {
   );
   const tagsState = useAsync(() => api.listIncidentTags(), []);
   const availableTags = tagsState.data ?? [];
+  const assigneesState = useAsync(() => api.listIncidentAssignees(), []);
+  const availableAssignees = assigneesState.data ?? [];
 
   function update(key, value) {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -172,6 +175,15 @@ export default function IncidentsPage() {
               <option value="">All</option>
               {availableTags.map((tag) => (
                 <option key={tag}>{tag}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Assignee
+            <select value={draft.assignee} onChange={(event) => update('assignee', event.target.value)}>
+              <option value="">Any</option>
+              {availableAssignees.map((assignee) => (
+                <option key={assignee}>{assignee}</option>
               ))}
             </select>
           </label>
@@ -307,6 +319,7 @@ export default function IncidentsPage() {
                       <th>Service</th>
                       <th>Severity</th>
                       <th>Status</th>
+                      <th>Assignee</th>
                       <th>Tags</th>
                       <th className="numeric">Occurrences</th>
                       <th>Last seen</th>
@@ -341,6 +354,7 @@ export default function IncidentsPage() {
                         <td>{incident.serviceName ?? 'unknown'}</td>
                         <td><SeverityBadge severity={incident.severity} /></td>
                         <td><StatusBadge status={incident.status} /></td>
+                        <td>{incident.assignee ?? <span className="muted">—</span>}</td>
                         <td><TagChips tags={incident.tags} /></td>
                         <td className="numeric">{formatNumber(incident.occurrenceCount)}</td>
                         <td>{formatDateTime(incident.lastSeen)}</td>

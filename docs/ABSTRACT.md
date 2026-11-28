@@ -12,8 +12,9 @@ The system is built as a layered Java 21 / Spring Boot 3.5.16 REST application b
 by MySQL 8 and Flyway migrations. A React 19 + Vite 8 frontend calls the REST API only;
 all dashboard numbers are aggregates computed from stored log entries, so an empty
 database produces honest zero values and meaningful empty states rather than mock data.
-Incidents can be searched, filtered, sorted, assigned a status and annotated with
-investigation notes. A token-similarity scorer suggests possibly related incidents but
+Incidents can be searched, filtered, sorted, assigned a status and owner, and annotated
+with investigation notes. Ownership changes are audited and filterable. A token-similarity
+scorer suggests possibly related incidents but
 never merges them automatically. Raw stored lines are searchable independently of
 incidents, so the exact INFO/DEBUG line behind a symptom can still be found.
 

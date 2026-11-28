@@ -6,6 +6,7 @@ import com.bugtrace.enums.Severity;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Query;
 
 import java.time.Instant;
 import java.util.List;
@@ -34,4 +35,9 @@ public interface IncidentRepository extends JpaRepository<Incident, Long>,
 
     List<Incident> findBySeverityAndIdNotOrderByOccurrenceCountDesc(
             Severity severity, Long id, Pageable pageable);
+
+    /** Distinct owners for the incident-list assignee filter. */
+    @Query("select distinct i.assignee from Incident i "
+            + "where i.assignee is not null and i.assignee <> '' order by i.assignee")
+    List<String> findDistinctAssignees();
 }

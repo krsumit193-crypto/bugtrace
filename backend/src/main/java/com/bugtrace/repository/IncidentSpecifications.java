@@ -26,13 +26,13 @@ public final class IncidentSpecifications {
     public static Specification<Incident> filter(String query, Severity severity,
                                                  IncidentStatus status,
                                                  Instant from, Instant toExclusive) {
-        return filter(query, severity, status, null, null, null, from, toExclusive);
+        return filter(query, severity, status, null, null, null, null, from, toExclusive);
     }
 
     public static Specification<Incident> filter(String query, Severity severity,
                                                  IncidentStatus status, String tag,
                                                  Instant from, Instant toExclusive) {
-        return filter(query, severity, status, tag, null, null, from, toExclusive);
+        return filter(query, severity, status, tag, null, null, null, from, toExclusive);
     }
 
     /**
@@ -43,6 +43,16 @@ public final class IncidentSpecifications {
     public static Specification<Incident> filter(String query, Severity severity,
                                                  IncidentStatus status, String tag,
                                                  Boolean snoozed, Instant now,
+                                                 Instant from, Instant toExclusive) {
+        return filter(query, severity, status, tag, null, snoozed, now, from, toExclusive);
+    }
+
+    /**
+     * @param assignee case-insensitive exact owner match, or {@code null} for any owner
+     */
+    public static Specification<Incident> filter(String query, Severity severity,
+                                                 IncidentStatus status, String tag,
+                                                 String assignee, Boolean snoozed, Instant now,
                                                  Instant from, Instant toExclusive) {
         return (root, criteriaQuery, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
@@ -69,6 +79,11 @@ public final class IncidentSpecifications {
                 tagged.select(tagRoot.get("incidentId"))
                         .where(cb.equal(tagRoot.get("tag"), tag.strip().toLowerCase(Locale.ROOT)));
                 predicates.add(root.get("id").in(tagged));
+            }
+            if (assignee != null && !assignee.isBlank()) {
+                predicates.add(cb.equal(
+                        cb.lower(root.get("assignee")),
+                        assignee.strip().toLowerCase(Locale.ROOT)));
             }
             if (snoozed != null) {
                 Instant reference = now == null ? Instant.now() : now;

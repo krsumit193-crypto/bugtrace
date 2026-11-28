@@ -114,6 +114,7 @@ export const api = {
   getIncidentEntries: (id, params) =>
     request(`/api/incidents/${id}/entries${query(params)}`),
   listIncidentTags: () => request('/api/incidents/tags'),
+  listIncidentAssignees: () => request('/api/incidents/assignees'),
   updateIncidentStatus: (id, status) =>
     request(`/api/incidents/${id}/status`, {
       method: 'PATCH',
@@ -126,6 +127,13 @@ export const api = {
     }),
   unsnoozeIncident: (id) =>
     request(`/api/incidents/${id}/snooze`, { method: 'DELETE' }),
+  updateIncidentAssignee: (id, assignee) =>
+    request(`/api/incidents/${id}/assignee`, {
+      method: 'PATCH',
+      body: JSON.stringify({ assignee }),
+    }),
+  clearIncidentAssignee: (id) =>
+    request(`/api/incidents/${id}/assignee`, { method: 'DELETE' }),
   bulkUpdateIncidentStatus: (ids, status) =>
     request('/api/incidents/bulk-status', {
       method: 'PATCH',

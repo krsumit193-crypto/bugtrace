@@ -22,6 +22,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -83,7 +84,7 @@ class IncidentControllerTest {
                         .getBytes(java.nio.charset.StandardCharsets.UTF_8),
                 1,
                 false);
-        when(incidentService.exportCsv(any(), any(), any(), any(), any(), any(), any(), any()))
+        when(incidentService.exportCsv(any(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(export);
 
         mockMvc.perform(get("/api/incidents/export").param("severity", "ERROR"))
@@ -98,7 +99,7 @@ class IncidentControllerTest {
 
     @Test
     void exportRejectsInvertedDateRange() throws Exception {
-        when(incidentService.exportCsv(any(), any(), any(), any(), any(), any(), any(), any()))
+        when(incidentService.exportCsv(any(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenThrow(new com.bugtrace.exception.InvalidRequestException(
                         "'from' must be on or before 'to'."));
 
@@ -141,6 +142,61 @@ class IncidentControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0]").value("database"))
                 .andExpect(jsonPath("$[1]").value("payment"));
+    }
+
+    @Test
+    void assigneesEndpointReturnsSuggestions() throws Exception {
+        when(incidentService.listAssignees()).thenReturn(java.util.List.of("alice", "bob"));
+
+        mockMvc.perform(get("/api/incidents/assignees"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0]").value("alice"))
+                .andExpect(jsonPath("$[1]").value("bob"));
+    }
+
+    @Test
+    void assigningAnOwnerReturnsTheUpdatedIncident() throws Exception {
+        when(incidentService.assign(1L, "alice")).thenReturn(summary(false, "alice"));
+
+        mockMvc.perform(patch("/api/incidents/1/assignee")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assignee\":\"alice\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.assignee").value("alice"));
+    }
+
+    @Test
+    void assigningRejectsBlankAndTooLongOwners() throws Exception {
+        mockMvc.perform(patch("/api/incidents/1/assignee")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assignee\":\"   \"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.assignee").exists());
+
+        mockMvc.perform(patch("/api/incidents/1/assignee")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assignee\":\"" + "a".repeat(101) + "\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.assignee").exists());
+    }
+
+    @Test
+    void clearingAnOwnerReturnsAnUnassignedIncident() throws Exception {
+        when(incidentService.unassign(1L)).thenReturn(summary(false, null));
+
+        mockMvc.perform(delete("/api/incidents/1/assignee"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.assignee").value(org.hamcrest.Matchers.nullValue()));
+    }
+
+    @Test
+    void corsPreflightAllowsPutForTagEdits() throws Exception {
+        mockMvc.perform(options("/api/incidents/1/tags")
+                        .header("Origin", "http://localhost:5173")
+                        .header("Access-Control-Request-Method", "PUT"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Access-Control-Allow-Methods",
+                        org.hamcrest.Matchers.containsString("PUT")));
     }
 
     @Test
@@ -196,6 +252,10 @@ class IncidentControllerTest {
     }
 
     private IncidentSummaryResponse summary(boolean snoozed) {
+        return summary(snoozed, null);
+    }
+
+    private IncidentSummaryResponse summary(boolean snoozed, String assignee) {
         Incident incident = new Incident(
                 "a".repeat(64),
                 "Database connection failed",
@@ -207,6 +267,9 @@ class IncidentControllerTest {
                 Instant.parse("2026-11-23T10:00:00Z"),
                 Instant.parse("2026-11-23T10:05:00Z"));
         incident.setId(1L);
+        if (assignee != null) {
+            incident.setAssignee(assignee);
+        }
         if (snoozed) {
             incident.setSnoozedUntil(Instant.now().plusSeconds(3_600));
         }

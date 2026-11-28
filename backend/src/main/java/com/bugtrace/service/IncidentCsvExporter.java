@@ -26,7 +26,7 @@ public final class IncidentCsvExporter {
     static final String BOM = "\uFEFF";
 
     static final String HEADER =
-            "id,fingerprint,title,service,severity,status,occurrences,first_seen,last_seen";
+            "id,fingerprint,title,service,severity,status,assignee,occurrences,first_seen,last_seen";
 
     private IncidentCsvExporter() {
     }
@@ -49,6 +49,7 @@ public final class IncidentCsvExporter {
                     .append(',')
                     .append(escape(incident.getStatus() == null ? null : incident.getStatus().name()))
                     .append(',')
+                    .append(escape(incident.getAssignee())).append(',')
                     .append(incident.getOccurrenceCount()).append(',')
                     .append(escape(incident.getFirstSeen() == null ? null : incident.getFirstSeen().toString()))
                     .append(',')

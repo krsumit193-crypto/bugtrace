@@ -65,7 +65,7 @@
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/api/incidents?q=connection&severity=ERROR&status=OPEN&tag=database&from=2026-11-01&to=2026-11-30&sort=count&page=0&size=20",
+              "raw": "{{baseUrl}}/api/incidents?q=connection&severity=ERROR&status=OPEN&tag=database&assignee=alice&from=2026-11-01&to=2026-11-30&sort=count&page=0&size=20",
               "host": ["{{baseUrl}}"],
               "path": ["api", "incidents"],
               "query": [
@@ -73,6 +73,7 @@
                 { "key": "severity", "value": "ERROR" },
                 { "key": "status", "value": "OPEN" },
                 { "key": "tag", "value": "database" },
+                { "key": "assignee", "value": "alice" },
                 { "key": "from", "value": "2026-11-01" },
                 { "key": "to", "value": "2026-11-30" },
                 { "key": "sort", "value": "count" },
@@ -80,7 +81,7 @@
                 { "key": "size", "value": "20" }
               ]
             },
-            "description": "All query parameters are optional. sort=latest|count. tag matches a lowercase incident tag."
+            "description": "All query parameters are optional. sort=latest|count. tag matches a lowercase incident tag; assignee is a case-insensitive exact owner match."
           }
         },
         {
@@ -89,6 +90,14 @@
             "method": "GET",
             "url": "{{baseUrl}}/api/incidents/tags",
             "description": "Returns a plain JSON array of tags used by the filter and tag editor."
+          }
+        },
+        {
+          "name": "List distinct assignees",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/incidents/assignees",
+            "description": "Returns a plain JSON array of owners used by the incident-list filter."
           }
         },
         {
@@ -143,6 +152,27 @@
           "request": {
             "method": "DELETE",
             "url": "{{baseUrl}}/api/incidents/{{incidentId}}/snooze"
+          }
+        },
+        {
+          "name": "Assign incident owner",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"assignee\": \"alice\"\n}"
+            },
+            "url": "{{baseUrl}}/api/incidents/{{incidentId}}/assignee",
+            "description": "Sets a trimmed 1-100 character owner. Re-applying the same owner is a no-op; a change appends an ASSIGNED activity."
+          }
+        },
+        {
+          "name": "Clear incident owner",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/api/incidents/{{incidentId}}/assignee",
+            "description": "Clears the owner and appends an UNASSIGNED activity when one was set."
           }
         },
         {

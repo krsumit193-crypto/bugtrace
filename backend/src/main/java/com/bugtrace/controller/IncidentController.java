@@ -4,6 +4,7 @@ import com.bugtrace.dto.request.BulkUpdateStatusRequest;
 import com.bugtrace.dto.request.CreateIncidentNoteRequest;
 import com.bugtrace.dto.request.SnoozeIncidentRequest;
 import com.bugtrace.dto.request.UpdateIncidentStatusRequest;
+import com.bugtrace.dto.request.UpdateAssigneeRequest;
 import com.bugtrace.dto.request.UpdateIncidentTagsRequest;
 import com.bugtrace.dto.response.BulkStatusResponse;
 import com.bugtrace.dto.response.IncidentDetailResponse;
@@ -57,19 +58,27 @@ public class IncidentController {
             @RequestParam(required = false) Severity severity,
             @RequestParam(required = false) IncidentStatus status,
             @RequestParam(required = false) String tag,
+            @RequestParam(required = false) String assignee,
             @RequestParam(required = false) Boolean snoozed,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
             @RequestParam(defaultValue = "latest") String sort,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
-        return incidentService.list(q, severity, status, tag, snoozed, from, to, sort, page, size);
+        return incidentService.list(
+                q, severity, status, tag, assignee, snoozed, from, to, sort, page, size);
     }
 
     /** Distinct tags, used by the frontend filter and tag editor suggestions. */
     @GetMapping("/tags")
     public List<String> tags() {
         return incidentService.listTags();
+    }
+
+    /** Distinct assignees, used by the incident-list owner filter. */
+    @GetMapping("/assignees")
+    public List<String> assignees() {
+        return incidentService.listAssignees();
     }
 
     @GetMapping("/{id}")
@@ -90,11 +99,13 @@ public class IncidentController {
             @RequestParam(required = false) Severity severity,
             @RequestParam(required = false) IncidentStatus status,
             @RequestParam(required = false) String tag,
+            @RequestParam(required = false) String assignee,
             @RequestParam(required = false) Boolean snoozed,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
             @RequestParam(defaultValue = "latest") String sort) {
-        IncidentExport export = incidentService.exportCsv(q, severity, status, tag, snoozed, from, to, sort);
+        IncidentExport export = incidentService.exportCsv(
+                q, severity, status, tag, assignee, snoozed, from, to, sort);
 
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
@@ -132,6 +143,19 @@ public class IncidentController {
     @DeleteMapping("/{id}/snooze")
     public IncidentSummaryResponse unsnooze(@PathVariable Long id) {
         return incidentService.unsnooze(id);
+    }
+
+    /** Assign or reassign an incident owner (1–100 characters). */
+    @PatchMapping("/{id}/assignee")
+    public IncidentSummaryResponse assign(@PathVariable Long id,
+                                          @Valid @RequestBody UpdateAssigneeRequest request) {
+        return incidentService.assign(id, request.assignee());
+    }
+
+    /** Clear the current owner. */
+    @DeleteMapping("/{id}/assignee")
+    public IncidentSummaryResponse unassign(@PathVariable Long id) {
+        return incidentService.unassign(id);
     }
 
     /** Bulk status update for the incident table's selection toolbar. */

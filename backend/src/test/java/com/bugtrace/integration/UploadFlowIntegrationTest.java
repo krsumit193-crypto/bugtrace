@@ -219,6 +219,37 @@ class UploadFlowIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements").value(0));
 
+        // Ownership workflow: assign -> filter/suggest/export -> clear -> audit trail.
+        mockMvc.perform(patch("/api/incidents/{id}/assignee", snoozeId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assignee\":\"  alice  \"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.assignee").value("alice"));
+
+        mockMvc.perform(get("/api/incidents").param("assignee", "ALICE"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].assignee").value("alice"));
+        mockMvc.perform(get("/api/incidents/assignees"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0]").value("alice"));
+        mockMvc.perform(get("/api/incidents/export").param("assignee", "alice"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("X-Exported-Rows", "1"));
+        mockMvc.perform(get("/api/incidents/{id}", snoozeId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.activities[?(@.type=='ASSIGNED')]").exists());
+
+        mockMvc.perform(delete("/api/incidents/{id}/assignee", snoozeId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.assignee").value(org.hamcrest.Matchers.nullValue()));
+        mockMvc.perform(get("/api/incidents").param("assignee", "alice"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(0));
+        mockMvc.perform(get("/api/incidents/{id}", snoozeId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.activities[?(@.type=='UNASSIGNED')]").exists());
+
         MvcResult rangeStatsResult = mockMvc.perform(get("/api/dashboard/stats").param("days", "7"))
                 .andExpect(status().isOk())
                 .andReturn();

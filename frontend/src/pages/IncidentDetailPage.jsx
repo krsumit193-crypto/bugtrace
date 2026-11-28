@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../api';
 import { SeverityBadge, SnoozeBadge, StatusBadge } from '../components/Badges';
@@ -9,6 +9,7 @@ import { formatDateTime, formatDuration, formatNumber } from '../utils';
 
 const STATUSES = ['OPEN', 'INVESTIGATING', 'RESOLVED'];
 const MAX_TAGS = 10;
+const MAX_ASSIGNEE_LENGTH = 100;
 
 const ACTIVITY_LABELS = {
   STATUS_CHANGED: 'Status changed',
@@ -17,6 +18,8 @@ const ACTIVITY_LABELS = {
   TAG_REMOVED: 'Tag removed',
   SNOOZED: 'Snoozed',
   UNSNOOZED: 'Snooze cleared',
+  ASSIGNED: 'Assignee changed',
+  UNASSIGNED: 'Assignee cleared',
 };
 
 function timeToResolve(incident) {
@@ -37,8 +40,12 @@ export default function IncidentDetailPage() {
   const [snoozeHours, setSnoozeHours] = useState(24);
   const [actionError, setActionError] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [assigneeInput, setAssigneeInput] = useState('');
 
   const incidentState = useAsync(() => api.getIncident(incidentId), [incidentId]);
+  useEffect(() => {
+    setAssigneeInput(incidentState.data?.assignee ?? '');
+  }, [incidentState.data]);
   const entriesState = useAsync(
     () => api.getIncidentEntries(incidentId, { page: entriesPage, size: 20 }),
     [incidentId, entriesPage],
@@ -75,6 +82,44 @@ export default function IncidentDetailPage() {
     setActionError(null);
     try {
       await api.unsnoozeIncident(incidentId);
+      incidentState.reload();
+    } catch (cause) {
+      setActionError(cause.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveAssignee(event) {
+    event.preventDefault();
+    const assignee = assigneeInput.trim();
+    if (!assignee) {
+      setActionError('Assignee must not be empty. Use Clear to remove an owner.');
+      return;
+    }
+    if (assignee.length > MAX_ASSIGNEE_LENGTH) {
+      setActionError(`Assignee must be at most ${MAX_ASSIGNEE_LENGTH} characters.`);
+      return;
+    }
+    setBusy(true);
+    setActionError(null);
+    try {
+      await api.updateIncidentAssignee(incidentId, assignee);
+      setAssigneeInput(assignee);
+      incidentState.reload();
+    } catch (cause) {
+      setActionError(cause.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function clearAssignee() {
+    setBusy(true);
+    setActionError(null);
+    try {
+      await api.clearIncidentAssignee(incidentId);
+      setAssigneeInput('');
       incidentState.reload();
     } catch (cause) {
       setActionError(cause.message);
@@ -228,6 +273,36 @@ export default function IncidentDetailPage() {
               </select>
             </div>
           </div>
+          <div className="detail-row">
+            <span>Assignee</span>
+            <form className="inline-control assignee-form" onSubmit={saveAssignee}>
+              <input
+                type="text"
+                aria-label="Assignee"
+                value={assigneeInput}
+                maxLength={MAX_ASSIGNEE_LENGTH}
+                placeholder="unassigned"
+                disabled={busy}
+                onChange={(event) => setAssigneeInput(event.target.value)}
+              />
+              <button
+                type="submit"
+                className="button button-ghost"
+                disabled={busy || !assigneeInput.trim()
+                  || assigneeInput.trim() === incident.assignee}
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                className="button button-ghost"
+                disabled={busy || !incident.assignee}
+                onClick={clearAssignee}
+              >
+                Clear
+              </button>
+            </form>
+          </div>
           {incident.status !== 'RESOLVED' ? (
             <div className="detail-row">
               <span>Snooze</span>
@@ -362,7 +437,7 @@ export default function IncidentDetailPage() {
         <div className="detail-side">
           <section className="panel">
             <h2>Activity</h2>
-            <p className="panel-subtitle">Status changes, notes and tag edits</p>
+            <p className="panel-subtitle">Status, ownership, notes and tag edits</p>
             {incident.activities.length === 0 ? (
               <p className="muted">No activity recorded yet.</p>
             ) : (

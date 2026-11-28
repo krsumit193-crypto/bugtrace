@@ -764,6 +764,8 @@ input:focus, select:focus, textarea:focus {
 .activity-tag_removed { background: #b42318; }
 .activity-snoozed { background: #7c3aed; }
 .activity-unsnoozed { background: #0d9488; }
+.activity-assigned { background: #2563eb; }
+.activity-unassigned { background: #b42318; }
 
 .activity-head {
   display: flex;
@@ -809,6 +811,9 @@ input:focus, select:focus, textarea:focus {
 }
 
 .inline-control select { width: auto; padding: 5px 8px; font-size: 12px; }
+
+.assignee-form input { width: 180px; padding: 5px 8px; font-size: 12px; }
+.assignee-form .button { padding: 5px 10px; font-size: 12px; }
 
 .sample-block {
   margin-top: 20px;

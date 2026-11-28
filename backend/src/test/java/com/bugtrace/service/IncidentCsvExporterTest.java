@@ -18,7 +18,7 @@ class IncidentCsvExporterTest {
                 1L, "fp-1", "Connection refused", "payments", Severity.ERROR, 42)));
 
         assertThat(csv).startsWith(IncidentCsvExporter.BOM + IncidentCsvExporter.HEADER + "\r\n");
-        assertThat(csv).contains("1,fp-1,Connection refused,payments,ERROR,OPEN,42,");
+        assertThat(csv).contains("1,fp-1,Connection refused,payments,ERROR,OPEN,,42,");
         assertThat(csv).endsWith("\r\n");
     }
 
@@ -40,7 +40,7 @@ class IncidentCsvExporterTest {
         String csv = IncidentCsvExporter.toCsv(List.of(incident));
 
         assertThat(csv).contains(
-                "7,fp-7,\"Timeout after 30s, retrying \"\"payment\"\"\nsecond line\",billing,FATAL,OPEN,3,");
+                "7,fp-7,\"Timeout after 30s, retrying \"\"payment\"\"\nsecond line\",billing,FATAL,OPEN,,3,");
     }
 
     @Test
@@ -62,7 +62,7 @@ class IncidentCsvExporterTest {
 
         String csv = IncidentCsvExporter.toCsv(List.of(incident));
 
-        assertThat(csv).contains("11,fp-11,Disk full,,ERROR,OPEN,5,");
+        assertThat(csv).contains("11,fp-11,Disk full,,ERROR,OPEN,,5,");
     }
 
     @Test
@@ -75,6 +75,17 @@ class IncidentCsvExporterTest {
     @Test
     void escapeHandlesCarriageReturn() {
         assertThat(IncidentCsvExporter.escape("line1\rline2")).isEqualTo("\"line1\rline2\"");
+    }
+
+    @Test
+    void escapesFormulaInjectionFromAssignee() {
+        Incident incident = incident(
+                13L, "fp-13", "Timeout", "payments", Severity.ERROR, 2);
+        incident.setAssignee("=cmd|'/c calc'!A1");
+
+        String csv = IncidentCsvExporter.toCsv(List.of(incident));
+
+        assertThat(csv).contains(",ERROR,OPEN,'=cmd|'/c calc'!A1,2,");
     }
 
     private static Incident incident(Long id, String fingerprint, String title,

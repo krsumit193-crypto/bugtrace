@@ -69,6 +69,7 @@ public class IncidentService {
     private static final double RELATED_MIN_SCORE = 0.45;
     private static final int MAX_TAGS = 10;
     private static final int MAX_TAG_LENGTH = 32;
+    private static final int MAX_ASSIGNEE_LENGTH = 100;
     private static final int MAX_ACTIVITY_DETAIL = 500;
     /** Longest snooze accepted: 30 days. */
     private static final int MAX_SNOOZE_HOURS = 720;
@@ -109,7 +110,7 @@ public class IncidentService {
                                                        IncidentStatus status,
                                                        LocalDate from, LocalDate to,
                                                        String sort, int page, int size) {
-        return list(query, severity, status, null, null, from, to, sort, page, size);
+        return list(query, severity, status, null, null, null, from, to, sort, page, size);
     }
 
     @Transactional(readOnly = true)
@@ -117,7 +118,7 @@ public class IncidentService {
                                                        IncidentStatus status, String tag,
                                                        LocalDate from, LocalDate to,
                                                        String sort, int page, int size) {
-        return list(query, severity, status, tag, null, from, to, sort, page, size);
+        return list(query, severity, status, tag, null, null, from, to, sort, page, size);
     }
 
     /**
@@ -130,10 +131,22 @@ public class IncidentService {
                                                        Boolean snoozed,
                                                        LocalDate from, LocalDate to,
                                                        String sort, int page, int size) {
+        return list(query, severity, status, tag, null, snoozed, from, to, sort, page, size);
+    }
+
+    /**
+     * @param assignee case-insensitive exact owner match, or {@code null} for any owner
+     */
+    @Transactional(readOnly = true)
+    public PageResponse<IncidentSummaryResponse> list(String query, Severity severity,
+                                                       IncidentStatus status, String tag,
+                                                       String assignee, Boolean snoozed,
+                                                       LocalDate from, LocalDate to,
+                                                       String sort, int page, int size) {
         validatePaging(page, size);
 
         Specification<Incident> specification =
-                buildSpecification(query, severity, status, tag, snoozed, from, to);
+                buildSpecification(query, severity, status, tag, assignee, snoozed, from, to);
         Pageable pageable = PageRequest.of(page, size, resolveSort(sort));
         Page<Incident> incidents = incidentRepository.findAll(specification, pageable);
 
@@ -151,21 +164,28 @@ public class IncidentService {
     @Transactional(readOnly = true)
     public IncidentExport exportCsv(String query, Severity severity, IncidentStatus status,
                                     LocalDate from, LocalDate to, String sort) {
-        return exportCsv(query, severity, status, null, null, from, to, sort);
+        return exportCsv(query, severity, status, null, null, null, from, to, sort);
     }
 
     @Transactional(readOnly = true)
     public IncidentExport exportCsv(String query, Severity severity, IncidentStatus status, String tag,
                                     LocalDate from, LocalDate to, String sort) {
-        return exportCsv(query, severity, status, tag, null, from, to, sort);
+        return exportCsv(query, severity, status, tag, null, null, from, to, sort);
     }
 
     @Transactional(readOnly = true)
     public IncidentExport exportCsv(String query, Severity severity, IncidentStatus status, String tag,
                                     Boolean snoozed,
                                     LocalDate from, LocalDate to, String sort) {
+        return exportCsv(query, severity, status, tag, null, snoozed, from, to, sort);
+    }
+
+    @Transactional(readOnly = true)
+    public IncidentExport exportCsv(String query, Severity severity, IncidentStatus status, String tag,
+                                    String assignee, Boolean snoozed,
+                                    LocalDate from, LocalDate to, String sort) {
         Specification<Incident> specification =
-                buildSpecification(query, severity, status, tag, snoozed, from, to);
+                buildSpecification(query, severity, status, tag, assignee, snoozed, from, to);
 
         // Fetch one extra row so truncation can be reported without a count query.
         Pageable pageable = PageRequest.of(0, MAX_EXPORT_ROWS + 1, resolveSort(sort));
@@ -231,6 +251,43 @@ public class IncidentService {
             recordActivity(incident.getId(), IncidentActivityType.UNSNOOZED, "Snooze cleared");
         }
         return IncidentSummaryResponse.from(incident, tagsFor(incident));
+    }
+
+    /** Assign an owner (1–100 characters, trimmed). Re-assigning the same owner is a no-op. */
+    @Transactional
+    public IncidentSummaryResponse assign(Long id, String rawAssignee) {
+        String assignee = normalizeAssignee(rawAssignee);
+        Incident incident = findIncident(id);
+        if (Objects.equals(assignee, incident.getAssignee())) {
+            return IncidentSummaryResponse.from(incident, tagsFor(incident));
+        }
+
+        String previous = incident.getAssignee();
+        incident.setAssignee(assignee);
+        recordActivity(incident.getId(), IncidentActivityType.ASSIGNED,
+                previous == null ? "Assigned to " + assignee
+                        : "Reassigned from " + previous + " to " + assignee);
+        return IncidentSummaryResponse.from(incident, tagsFor(incident));
+    }
+
+    /** Clear the current owner. Clearing an unassigned incident is a no-op. */
+    @Transactional
+    public IncidentSummaryResponse unassign(Long id) {
+        Incident incident = findIncident(id);
+        if (incident.getAssignee() == null) {
+            return IncidentSummaryResponse.from(incident, tagsFor(incident));
+        }
+
+        String previous = incident.getAssignee();
+        incident.setAssignee(null);
+        recordActivity(incident.getId(), IncidentActivityType.UNASSIGNED,
+                "Unassigned from " + previous);
+        return IncidentSummaryResponse.from(incident, tagsFor(incident));
+    }
+
+    @Transactional(readOnly = true)
+    public List<String> listAssignees() {
+        return incidentRepository.findDistinctAssignees();
     }
 
     @Transactional(readOnly = true)
@@ -421,7 +478,7 @@ public class IncidentService {
 
     private Specification<Incident> buildSpecification(String query, Severity severity,
                                                        IncidentStatus status, String tag,
-                                                       Boolean snoozed,
+                                                       String assignee, Boolean snoozed,
                                                        LocalDate from, LocalDate to) {
         if (from != null && to != null && from.isAfter(to)) {
             throw new InvalidRequestException("'from' must be on or before 'to'.");
@@ -430,9 +487,22 @@ public class IncidentService {
         Instant fromInstant = from == null ? null : from.atStartOfDay(zoneId).toInstant();
         Instant toExclusive = to == null ? null : to.plusDays(1).atStartOfDay(zoneId).toInstant();
         String normalizedTag = tag == null || tag.isBlank() ? null : normalizeTag(tag);
+        String normalizedAssignee = assignee == null || assignee.isBlank() ? null : assignee.strip();
         return IncidentSpecifications.filter(
-                query, severity, status, normalizedTag, snoozed, Instant.now(),
+                query, severity, status, normalizedTag, normalizedAssignee, snoozed, Instant.now(),
                 fromInstant, toExclusive);
+    }
+
+    private String normalizeAssignee(String rawAssignee) {
+        if (rawAssignee == null || rawAssignee.isBlank()) {
+            throw new InvalidRequestException("'assignee' is required.");
+        }
+        String assignee = rawAssignee.strip();
+        if (assignee.length() > MAX_ASSIGNEE_LENGTH) {
+            throw new InvalidRequestException(
+                    "'assignee' must be at most " + MAX_ASSIGNEE_LENGTH + " characters.");
+        }
+        return assignee;
     }
 
     private String normalizeTag(String rawTag) {
